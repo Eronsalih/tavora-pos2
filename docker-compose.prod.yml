@@ -1,0 +1,32 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: tavora-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    image: ghcr.io/eronsalih/tavora-backend:latest
+    container_name: tavora-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGODB_URL: mongodb://mongo:27017
+      MONGODB_DB_NAME: tavora
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+
+  frontend:
+    image: ghcr.io/eronsalih/tavora-frontend:latest
+    container_name: tavora-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  mongo_data:
