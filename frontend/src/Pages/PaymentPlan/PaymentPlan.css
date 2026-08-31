@@ -1,0 +1,759 @@
+.payment-plan-page {
+  width: 100%;
+  min-height: 100%;
+  padding: 34px;
+  box-sizing: border-box;
+
+  background:
+    radial-gradient(
+      circle at 50% -20%,
+      rgba(109, 93, 252, 0.08),
+      transparent 32%
+    ),
+    #f8f9fc;
+
+  color: #182230;
+}
+
+.payment-plan-container {
+  width: min(100%, 1320px);
+  margin: 0 auto;
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.payment-plan-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 30px;
+
+  margin-bottom: 26px;
+}
+
+.payment-plan-eyebrow {
+  margin: 0 0 7px;
+
+  color: #7c6df5;
+
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+
+  text-transform: uppercase;
+}
+
+.payment-plan-header h1 {
+  margin: 0;
+
+  color: #111827;
+
+  font-size: 34px;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+.payment-plan-header-description {
+  max-width: 650px;
+
+  margin: 10px 0 0;
+
+  color: #667085;
+
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.payment-plan-dashboard-button {
+  min-height: 42px;
+
+  padding: 0 18px;
+
+  border: 1px solid #dfe3ea;
+  border-radius: 10px;
+
+  background: #ffffff;
+  color: #344054;
+
+  font-size: 13px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.payment-plan-dashboard-button:hover {
+  border-color: #b8b1fa;
+
+  background: #f8f7ff;
+
+  transform: translateY(-1px);
+}
+
+/* =========================================================
+   CURRENT PLAN
+========================================================= */
+
+.payment-plan-current {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  margin-bottom: 22px;
+  padding: 16px 18px;
+
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+
+  background: #ffffff;
+
+  box-shadow: 0 2px 5px rgba(16, 24, 40, 0.03);
+}
+
+.payment-plan-current-icon {
+  width: 42px;
+  height: 42px;
+
+  display: grid;
+  place-items: center;
+
+  flex: 0 0 auto;
+
+  border-radius: 12px;
+
+  background: #f0fdf4;
+  color: #16a36a;
+}
+
+.payment-plan-current-info {
+  min-width: 0;
+
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.payment-plan-current-info > span {
+  color: #667085;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.payment-plan-current-info strong {
+  color: #101828;
+
+  font-size: 16px;
+}
+
+.payment-plan-current-info small {
+  color: #667085;
+
+  font-size: 12px;
+}
+
+.payment-plan-active-badge {
+  padding: 6px 10px;
+
+  border-radius: 999px;
+
+  background: #ecfdf3;
+  color: #027a48;
+
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* =========================================================
+   BILLING TOGGLE
+========================================================= */
+
+.payment-plan-billing-wrapper {
+  display: flex;
+  justify-content: center;
+
+  margin: 8px 0 30px;
+}
+
+.payment-plan-billing-toggle {
+  display: inline-flex;
+
+  padding: 4px;
+
+  border: 1px solid #e4e7ec;
+  border-radius: 11px;
+
+  background: #ffffff;
+
+  box-shadow: 0 2px 5px rgba(16, 24, 40, 0.03);
+}
+
+.payment-plan-billing-button {
+  min-height: 38px;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 0 16px;
+
+  border: none;
+  border-radius: 8px;
+
+  background: transparent;
+  color: #667085;
+
+  font-size: 13px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.payment-plan-billing-button > span {
+  padding: 3px 7px;
+
+  border-radius: 999px;
+
+  background: #ecfdf3;
+  color: #027a48;
+
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.payment-plan-billing-button-active {
+  background: #111827;
+  color: #ffffff;
+
+  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.14);
+}
+
+/* =========================================================
+   MESSAGES
+========================================================= */
+
+.payment-plan-message {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  margin-bottom: 22px;
+  padding: 12px 14px;
+
+  border-radius: 10px;
+
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.payment-plan-message-success {
+  border: 1px solid #abefc6;
+
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.payment-plan-message-error {
+  border: 1px solid #fecdca;
+
+  background: #fef3f2;
+  color: #b42318;
+}
+
+/* =========================================================
+   GRID
+========================================================= */
+
+.payment-plan-grid {
+  display: grid;
+
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  gap: 20px;
+
+  align-items: stretch;
+}
+
+/* =========================================================
+   CARD
+========================================================= */
+
+.payment-plan-card {
+  position: relative;
+
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  padding: 26px;
+
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+
+  background: #ffffff;
+
+  box-shadow:
+    0 1px 3px rgba(16, 24, 40, 0.04),
+    0 4px 10px rgba(16, 24, 40, 0.02);
+
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.payment-plan-card:hover {
+  transform: translateY(-3px);
+
+  box-shadow:
+    0 10px 24px rgba(16, 24, 40, 0.08),
+    0 2px 6px rgba(16, 24, 40, 0.04);
+}
+
+.payment-plan-card-popular {
+  border: 2px solid #7065f0;
+
+  box-shadow:
+    0 10px 28px rgba(109, 93, 252, 0.11),
+    0 2px 6px rgba(16, 24, 40, 0.04);
+}
+
+.payment-plan-card-current {
+  background:
+    linear-gradient(180deg, rgba(109, 93, 252, 0.035), rgba(255, 255, 255, 0)),
+    #ffffff;
+}
+
+/* =========================================================
+   BADGES
+========================================================= */
+
+.payment-plan-popular-badge {
+  position: absolute;
+
+  top: -13px;
+  right: 18px;
+
+  padding: 6px 12px;
+
+  border: 1px solid #7065f0;
+  border-radius: 8px 8px 0 8px;
+
+  background: #ffffff;
+  color: #6255e7;
+
+  font-size: 10px;
+  font-weight: 800;
+
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.payment-plan-your-plan-badge {
+  position: absolute;
+
+  top: 18px;
+  right: 18px;
+
+  padding: 5px 9px;
+
+  border-radius: 999px;
+
+  background: #f0fdf4;
+  color: #027a48;
+
+  font-size: 10px;
+  font-weight: 800;
+
+  text-transform: uppercase;
+}
+
+/* =========================================================
+   CARD HEADER
+========================================================= */
+
+.payment-plan-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding-right: 72px;
+}
+
+.payment-plan-card-icon {
+  width: 44px;
+  height: 44px;
+
+  display: grid;
+  place-items: center;
+
+  flex: 0 0 auto;
+
+  border-radius: 12px;
+
+  background: #f5f3ff;
+  color: #6d5dfc;
+}
+
+.payment-plan-card-heading h2 {
+  margin: 0;
+
+  color: #101828;
+
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.payment-plan-card-heading span {
+  display: block;
+
+  margin-top: 3px;
+
+  color: #98a2b3;
+
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.payment-plan-card-description {
+  min-height: 66px;
+
+  margin: 20px 0 0;
+
+  color: #667085;
+
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* =========================================================
+   PRICE
+========================================================= */
+
+.payment-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+
+  margin-top: 24px;
+}
+
+.payment-plan-price strong {
+  color: #101828;
+
+  font-size: 38px;
+  line-height: 1;
+
+  letter-spacing: -0.045em;
+}
+
+.payment-plan-price > span {
+  color: #667085;
+
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.payment-plan-price-note {
+  min-height: 19px;
+
+  margin-top: 8px;
+
+  color: #98a2b3;
+
+  font-size: 11px;
+}
+
+.payment-plan-price-note strong {
+  color: #475467;
+}
+
+.payment-plan-divider {
+  height: 1px;
+
+  margin: 22px 0;
+
+  background: #eaecf0;
+}
+
+/* =========================================================
+   FEATURES
+========================================================= */
+
+.payment-plan-features {
+  display: grid;
+  gap: 12px;
+
+  flex: 1;
+}
+
+.payment-plan-features > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+
+  color: #344054;
+
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.payment-plan-check {
+  width: 19px;
+  height: 19px;
+
+  display: grid;
+  place-items: center;
+
+  flex: 0 0 auto;
+
+  margin-top: -1px;
+
+  border-radius: 50%;
+
+  background: #ecfdf3;
+  color: #039855;
+}
+
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+.payment-plan-card-actions {
+  margin-top: 26px;
+}
+
+.payment-plan-button {
+  width: 100%;
+  min-height: 46px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  padding: 0 14px;
+
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+
+  background: #ffffff;
+  color: #344054;
+
+  font-size: 12px;
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.payment-plan-button:hover:not(:disabled) {
+  border-color: #ada4f8;
+
+  background: #f8f7ff;
+
+  transform: translateY(-1px);
+}
+
+.payment-plan-button-primary {
+  border-color: #6d5dfc;
+
+  background: #6d5dfc;
+  color: #ffffff;
+
+  box-shadow: 0 7px 16px rgba(109, 93, 252, 0.2);
+}
+
+.payment-plan-button-primary:hover:not(:disabled) {
+  border-color: #6255e7;
+
+  background: #6255e7;
+
+  box-shadow: 0 9px 20px rgba(109, 93, 252, 0.26);
+}
+
+.payment-plan-button:disabled {
+  cursor: not-allowed;
+
+  opacity: 0.58;
+
+  transform: none;
+}
+
+.payment-plan-dev-button {
+  width: 100%;
+  min-height: 42px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  margin-top: 9px;
+
+  border: 1px dashed #86efac;
+  border-radius: 9px;
+
+  background: #f0fdf4;
+  color: #067647;
+
+  font-size: 11px;
+  font-weight: 800;
+
+  cursor: pointer;
+}
+
+.payment-plan-dev-button:hover:not(:disabled) {
+  background: #dcfae6;
+}
+
+.payment-plan-dev-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.payment-plan-spinner {
+  animation: payment-plan-spin 0.8s linear infinite;
+}
+
+@keyframes payment-plan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* =========================================================
+   FOOTER
+========================================================= */
+
+.payment-plan-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  margin-top: 26px;
+
+  color: #98a2b3;
+
+  font-size: 11px;
+  text-align: center;
+}
+
+.payment-plan-footer svg {
+  flex: 0 0 auto;
+
+  color: #16a36a;
+}
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1100px) {
+  .payment-plan-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payment-plan-card:last-child {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .payment-plan-page {
+    padding: 24px 18px;
+  }
+
+  .payment-plan-header {
+    flex-direction: column;
+  }
+
+  .payment-plan-dashboard-button {
+    width: 100%;
+  }
+
+  .payment-plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-plan-card:last-child {
+    grid-column: auto;
+  }
+
+  .payment-plan-current {
+    align-items: flex-start;
+  }
+
+  .payment-plan-active-badge {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .payment-plan-page {
+    padding: 20px 13px;
+  }
+
+  .payment-plan-header h1 {
+    font-size: 29px;
+  }
+
+  .payment-plan-billing-wrapper {
+    justify-content: stretch;
+  }
+
+  .payment-plan-billing-toggle {
+    width: 100%;
+  }
+
+  .payment-plan-billing-button {
+    flex: 1;
+
+    justify-content: center;
+
+    padding: 0 10px;
+  }
+
+  .payment-plan-card {
+    padding: 23px 19px;
+  }
+
+  .payment-plan-card-heading {
+    padding-right: 0;
+  }
+
+  .payment-plan-your-plan-badge {
+    position: static;
+
+    width: fit-content;
+
+    margin-bottom: 14px;
+  }
+
+  .payment-plan-price strong {
+    font-size: 34px;
+  }
+}

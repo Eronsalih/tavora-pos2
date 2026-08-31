@@ -21,3 +21,13 @@ backend/create_admin.py
 backend/reset_admin.py
 backend/reset_admin_password.py
 backend/set_admin_pin.py
+
+# Environment files
+.env*
+!.env.example
+
+# Electron build output
+frontend/release/
+
+# Local test/reset scripts
+backend/scripts/reset_business_a_password.py

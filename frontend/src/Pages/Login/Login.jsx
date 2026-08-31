@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
+
 import {
   ArrowLeft,
   Delete,
@@ -16,12 +17,15 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
+
 import { loginUser, loginWithPin } from "../../services/authService";
 
 import heroImage from "../../assets/Tavora-pos-Img.png";
+
 import "./Login.css";
 
 const PIN_LENGTH = 4;
+
 const KEYPAD_NUMBERS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 function Login() {
@@ -29,19 +33,24 @@ function Login() {
 
   const currentLanguage = i18n.language;
 
-  async function changeLanguage(language) {
-    await i18n.changeLanguage(language);
-
-    localStorage.setItem("tavora_language", language);
-  }
   const navigate = useNavigate();
+
   const location = useLocation();
 
   const { login } = useAuth();
 
+  // =====================================================
+  // ROUTING
+  // =====================================================
+
   const destination = location.state?.from || "/";
 
+  // =====================================================
+  // STATE
+  // =====================================================
+
   const [loginMode, setLoginMode] = useState("pin");
+
   const [pin, setPin] = useState("");
 
   const [formData, setFormData] = useState({
@@ -50,8 +59,24 @@ function Login() {
   });
 
   const [showPassword, setShowPassword] = useState(false);
+
   const [loading, setLoading] = useState(false);
+
   const [error, setError] = useState("");
+
+  // =====================================================
+  // LANGUAGE
+  // =====================================================
+
+  async function changeLanguage(language) {
+    await i18n.changeLanguage(language);
+
+    localStorage.setItem("tavora_language", language);
+  }
+
+  // =====================================================
+  // ERROR
+  // =====================================================
 
   function clearError() {
     if (error) {
@@ -59,12 +84,17 @@ function Login() {
     }
   }
 
+  // =====================================================
+  // PIN
+  // =====================================================
+
   function handlePinNumber(number) {
     if (loading || pin.length >= PIN_LENGTH) {
       return;
     }
 
     clearError();
+
     setPin((currentPin) => `${currentPin}${number}`);
   }
 
@@ -74,6 +104,7 @@ function Login() {
     }
 
     clearError();
+
     setPin((currentPin) => currentPin.slice(0, -1));
   }
 
@@ -83,6 +114,7 @@ function Login() {
     }
 
     clearError();
+
     setPin("");
   }
 
@@ -95,24 +127,24 @@ function Login() {
 
     if (pin.length !== PIN_LENGTH) {
       setError(t("login.pinLengthError"));
+
       return;
     }
 
     try {
       setLoading(true);
+
       setError("");
 
       const authenticationData = await loginWithPin(pin);
 
-      login(authenticationData);
+      await login(authenticationData);
 
       navigate(destination, {
         replace: true,
       });
     } catch (err) {
       console.error("PIN Login Error:", err);
-
-      const detail = err.response?.data?.detail;
 
       setError(t("login.invalidPin"));
 
@@ -122,11 +154,16 @@ function Login() {
     }
   }
 
+  // =====================================================
+  // ADMIN LOGIN FORM
+  // =====================================================
+
   function handleChange(event) {
     const { name, value } = event.target;
 
     setFormData((currentData) => ({
       ...currentData,
+
       [name]: value,
     }));
 
@@ -138,13 +175,15 @@ function Login() {
 
     const email = formData.email.trim();
 
-    if (!formData.email || !formData.password) {
+    if (!email || !formData.password) {
       setError(t("login.requiredFields"));
+
       return;
     }
 
     try {
       setLoading(true);
+
       setError("");
 
       const authenticationData = await loginUser({
@@ -152,13 +191,29 @@ function Login() {
         password: formData.password,
       });
 
-      login(authenticationData);
+      await login(authenticationData);
+
+      // ===============================================
+      // TAVORA PLATFORM OWNER
+      // ===============================================
+
+      if (authenticationData.user?.role === "superadmin") {
+        navigate("/owner", {
+          replace: true,
+        });
+
+        return;
+      }
+
+      // ===============================================
+      // RESTAURANT / TENANT USER
+      // ===============================================
 
       navigate(destination, {
         replace: true,
       });
-    } catch (error) {
-      console.error("Admin login failed:", error);
+    } catch (err) {
+      console.error("Admin login failed:", err);
 
       setError(t("login.loginFailed"));
     } finally {
@@ -166,14 +221,28 @@ function Login() {
     }
   }
 
+  // =====================================================
+  // LOGIN MODE
+  // =====================================================
+
   function switchLoginMode(mode) {
     setLoginMode(mode);
+
     setError("");
+
     setPin("");
   }
 
+  // =====================================================
+  // UI
+  // =====================================================
+
   return (
     <main className="login-page">
+      {/* ============================================= */}
+      {/* LEFT SIDE */}
+      {/* ============================================= */}
+
       <section
         className="login-visual"
         style={{
@@ -192,6 +261,7 @@ function Login() {
 
             <div>
               <p>Tavora</p>
+
               <span>{t("login.pointOfSale")}</span>
             </div>
           </div>
@@ -199,11 +269,13 @@ function Login() {
           <div className="login-hero-copy">
             <span className="login-status-badge">
               <span className="login-status-dot" />
+
               {t("login.systemOnline")}
             </span>
 
             <h1>
               {t("login.heroTitle")}
+
               <strong>{t("login.heroStrong")}</strong>
             </h1>
 
@@ -213,11 +285,13 @@ function Login() {
           <div className="login-feature-list">
             <div className="login-feature">
               <LayoutDashboard size={20} />
+
               <span>{t("login.realtimeManagement")}</span>
             </div>
 
             <div className="login-feature">
               <ShieldCheck size={20} />
+
               <span>{t("login.secureEmployeeAccess")}</span>
             </div>
           </div>
@@ -226,8 +300,16 @@ function Login() {
         <p className="login-copyright">{t("login.copyright")}</p>
       </section>
 
+      {/* ============================================= */}
+      {/* RIGHT SIDE */}
+      {/* ============================================= */}
+
       <section className="login-access">
         <div className="login-access-wrapper">
+          {/* ========================================= */}
+          {/* LANGUAGE */}
+          {/* ========================================= */}
+
           <div className="login-language-switcher">
             <button
               type="button"
@@ -259,6 +341,11 @@ function Login() {
               SQ
             </button>
           </div>
+
+          {/* ========================================= */}
+          {/* PIN LOGIN */}
+          {/* ========================================= */}
+
           {loginMode === "pin" ? (
             <>
               <div className="login-mobile-brand">
@@ -307,16 +394,21 @@ function Login() {
                     count: pin.length,
                   })}
                 >
-                  {Array.from({ length: PIN_LENGTH }, (_, index) => (
-                    <span
-                      key={index}
-                      className={`pin-dot ${
-                        index < pin.length ? "pin-dot-filled" : ""
-                      }`}
-                    >
-                      {index < pin.length ? "●" : ""}
-                    </span>
-                  ))}
+                  {Array.from(
+                    {
+                      length: PIN_LENGTH,
+                    },
+                    (_, index) => (
+                      <span
+                        key={index}
+                        className={`pin-dot ${
+                          index < pin.length ? "pin-dot-filled" : ""
+                        }`}
+                      >
+                        {index < pin.length ? "●" : ""}
+                      </span>
+                    ),
+                  )}
                 </div>
 
                 <div className="pin-keypad">
@@ -366,8 +458,13 @@ function Login() {
                   className="login-submit-button"
                   disabled={loading || pin.length !== PIN_LENGTH}
                 >
-                  <LogIn size={19} />
-                  {t("login.accessPos")}
+                  {loading ? (
+                    <LoaderCircle size={19} className="login-spinner" />
+                  ) : (
+                    <LogIn size={19} />
+                  )}
+
+                  {loading ? t("login.signingIn") : t("login.accessPos")}
                 </button>
               </form>
 
@@ -376,9 +473,11 @@ function Login() {
 
                 <div>
                   <strong>{t("login.secureLogin")}</strong>
+
                   <span>{t("login.pinProtected")}</span>
                 </div>
               </div>
+
               <button
                 type="button"
                 className="login-mode-button"
@@ -389,12 +488,17 @@ function Login() {
             </>
           ) : (
             <>
+              {/* ===================================== */}
+              {/* EMAIL LOGIN */}
+              {/* ===================================== */}
+
               <button
                 type="button"
                 className="login-back-button"
                 onClick={() => switchLoginMode("pin")}
               >
                 <ArrowLeft size={18} />
+
                 {t("login.employeePinLogin")}
               </button>
 
@@ -482,6 +586,14 @@ function Login() {
                   {loading ? t("login.signingIn") : t("login.loginButton")}
                 </button>
               </form>
+
+              <button
+                type="button"
+                className="login-mode-button"
+                onClick={() => navigate("/register")}
+              >
+                Create Tavora Account
+              </button>
             </>
           )}
         </div>

@@ -1,12 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, health, orders, products, reports, tables
+from app.routers import (
+    auth,
+    health,
+    orders,
+    payments,
+    platform_admin,
+    products,
+    reports,
+    tables,
+)
+
 
 app = FastAPI(
     title="Tavora POS API",
     version="1.0.0",
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,9 +32,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health.router)
-app.include_router(products.router)
-app.include_router(tables.router)
-app.include_router(orders.router)
-app.include_router(auth.router)
-app.include_router(reports.router)
+
+app.include_router(
+    health.router
+)
+
+app.include_router(
+    products.router
+)
+
+app.include_router(
+    tables.router
+)
+
+app.include_router(
+    orders.router
+)
+
+app.include_router(
+    auth.router
+)
+
+app.include_router(
+    reports.router
+)
+
+app.include_router(
+    payments.router
+)
+
+app.include_router(
+    platform_admin.router
+)

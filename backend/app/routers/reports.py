@@ -6,20 +6,47 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.database.mongodb import database
-from app.routers.auth import get_current_user
+from app.routers.auth import (
+    get_current_user,
+    require_active_subscription,
+)
 
 
 router = APIRouter(
     prefix="/api/reports",
     tags=["Reports"],
+    dependencies=[
+        Depends(require_active_subscription),
+    ],
 )
 
 BUSINESS_TIMEZONE = ZoneInfo("Europe/Belgrade")
 
 
+def get_business_object_id(
+    current_user: dict,
+) -> ObjectId:
+    business_id = current_user.get("business_id")
+
+    if not business_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Business ID is missing.",
+        )
+
+    if not ObjectId.is_valid(business_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid business ID.",
+        )
+
+    return ObjectId(business_id)
+
+
 async def resolve_report_user(
     current_user: dict,
     waiter_id: str | None,
+    business_id: ObjectId,
 ) -> dict:
     if current_user["role"] != "admin" or not waiter_id:
         return {
@@ -39,6 +66,11 @@ async def resolve_report_user(
     selected_user = await users_collection.find_one(
         {
             "_id": ObjectId(waiter_id),
+            "business_id": business_id,
+            "role": "waiter",
+            "is_active": {
+                "$ne": False,
+            },
         }
     )
 
@@ -58,6 +90,7 @@ async def resolve_report_user(
 async def calculate_daily_report(
     selected_date: date,
     target_user: dict,
+    business_id: ObjectId,
 ) -> dict:
     start_local = datetime.combine(
         selected_date,
@@ -82,6 +115,7 @@ async def calculate_daily_report(
     orders_collection = database["orders"]
 
     query = {
+        "business_id": business_id,
         "status": "paid",
         "paid_by_user_id": target_user["id"],
         "paid_at": {
@@ -150,6 +184,10 @@ async def get_daily_waiter_report(
         default=None,
     ),
 ):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     selected_date = report_date or datetime.now(
         BUSINESS_TIMEZONE
     ).date()
@@ -157,11 +195,13 @@ async def get_daily_waiter_report(
     target_user = await resolve_report_user(
         current_user,
         waiter_id,
+        business_id,
     )
 
     return await calculate_daily_report(
         selected_date,
         target_user,
+        business_id,
     )
 
 
@@ -172,6 +212,10 @@ async def get_report_waiters(
         Depends(get_current_user),
     ],
 ):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     if current_user["role"] != "admin":
         return [
             {
@@ -185,6 +229,7 @@ async def get_report_waiters(
 
     waiters = await users_collection.find(
         {
+            "business_id": business_id,
             "role": "waiter",
             "is_active": {
                 "$ne": False,
@@ -223,6 +268,10 @@ async def close_daily_report(
         default=None,
     ),
 ):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     selected_date = report_date or datetime.now(
         BUSINESS_TIMEZONE
     ).date()
@@ -240,11 +289,13 @@ async def close_daily_report(
     target_user = await resolve_report_user(
         current_user,
         waiter_id,
+        business_id,
     )
 
     report = await calculate_daily_report(
         selected_date,
         target_user,
+        business_id,
     )
 
     daily_reports_collection = database[
@@ -253,6 +304,7 @@ async def close_daily_report(
 
     existing_report = await daily_reports_collection.find_one(
         {
+            "business_id": business_id,
             "waiter_id": target_user["id"],
             "report_date": selected_date.isoformat(),
         }
@@ -272,6 +324,7 @@ async def close_daily_report(
     )
 
     closed_report = {
+        "business_id": business_id,
         "waiter_id": target_user["id"],
         "waiter_name": target_user["name"],
         "waiter_role": target_user["role"],

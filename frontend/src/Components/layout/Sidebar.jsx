@@ -1,16 +1,17 @@
 import {
   BarChart3,
   ChefHat,
+  CreditCard,
+  GlassWater,
   LayoutDashboard,
   LogOut,
   Package,
   ReceiptText,
   Settings,
   TableProperties,
-  GlassWater,
 } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
+import { useTranslation } from "react-i18next";
 import { NavLink, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/AuthContext";
@@ -61,6 +62,13 @@ const navigationItems = [
     roles: ["admin", "cashier"],
   },
   {
+    translationKey: "nav.paymentPlan",
+    defaultLabel: "Payment Plan",
+    path: "/payment-plan",
+    icon: CreditCard,
+    roles: ["admin"],
+  },
+  {
     translationKey: "nav.settings",
     path: "/settings",
     icon: Settings,
@@ -69,7 +77,7 @@ const navigationItems = [
 ];
 
 function Sidebar() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   const navigate = useNavigate();
 
@@ -120,7 +128,12 @@ function Sidebar() {
               }
             >
               <Icon size={19} />
-              <span>{t(item.translationKey)}</span>
+
+              <span>
+                {t(item.translationKey, {
+                  defaultValue: item.defaultLabel,
+                })}
+              </span>
             </NavLink>
           );
         })}

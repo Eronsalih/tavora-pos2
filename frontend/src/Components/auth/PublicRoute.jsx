@@ -1,10 +1,15 @@
 import { Navigate, Outlet } from "react-router-dom";
+
 import { LoaderCircle } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 
 function PublicRoute() {
-  const { isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
+
+  // =====================================================
+  // LOADING
+  // =====================================================
 
   if (loading) {
     return (
@@ -27,9 +32,27 @@ function PublicRoute() {
     );
   }
 
+  // =====================================================
+  // ALREADY AUTHENTICATED
+  // =====================================================
+
   if (isAuthenticated) {
+    /*
+     * Tavora platform owner
+     */
+    if (user?.role === "superadmin") {
+      return <Navigate to="/owner" replace />;
+    }
+
+    /*
+     * Restaurant users
+     */
     return <Navigate to="/" replace />;
   }
+
+  // =====================================================
+  // PUBLIC PAGE
+  // =====================================================
 
   return <Outlet />;
 }

@@ -1,9 +1,14 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database.mongodb import database
+from app.routers.auth import (
+    get_current_user,
+    require_active_subscription,
+)
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
@@ -13,11 +18,42 @@ from app.schemas.product import (
 router = APIRouter(
     prefix="/api/products",
     tags=["Products"],
+    dependencies=[
+        Depends(require_active_subscription),
+    ],
 )
+
+
+ACTIVE_ORDER_STATUSES = {
+    "draft",
+    "sent_to_kitchen",
+    "preparing",
+    "ready",
+}
 
 
 def get_current_time() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def get_business_object_id(
+    current_user: dict,
+) -> ObjectId:
+    business_id = current_user.get("business_id")
+
+    if not business_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Business ID is missing.",
+        )
+
+    if not ObjectId.is_valid(business_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid business ID.",
+        )
+
+    return ObjectId(business_id)
 
 
 def serialize_datetime(value):
@@ -47,7 +83,9 @@ def serialize_product(product: dict) -> dict:
     }
 
 
-def validate_product_id(product_id: str) -> ObjectId:
+def validate_product_id(
+    product_id: str,
+) -> ObjectId:
     if not ObjectId.is_valid(product_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -59,13 +97,15 @@ def validate_product_id(product_id: str) -> ObjectId:
 
 async def check_duplicate_name(
     name: str,
+    business_id: ObjectId,
     excluded_product_id: ObjectId | None = None,
 ):
     query = {
+        "business_id": business_id,
         "name": {
             "$regex": f"^{name}$",
             "$options": "i",
-        }
+        },
     }
 
     if excluded_product_id is not None:
@@ -87,10 +127,23 @@ async def check_duplicate_name(
 
 
 @router.get("")
-async def get_products():
+async def get_products(
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     products = []
 
-    cursor = database["products"].find().sort(
+    cursor = database["products"].find(
+        {
+            "business_id": business_id,
+        }
+    ).sort(
         "created_at",
         -1,
     )
@@ -104,14 +157,27 @@ async def get_products():
 
 
 @router.get("/{product_id}")
-async def get_product(product_id: str):
-    object_id = validate_product_id(product_id)
+async def get_product(
+    product_id: str,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
+    object_id = validate_product_id(
+        product_id
+    )
 
     product = await database[
         "products"
     ].find_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -130,14 +196,24 @@ async def get_product(product_id: str):
 )
 async def create_product(
     product_data: ProductCreate,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
 ):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     await check_duplicate_name(
-        product_data.name
+        product_data.name,
+        business_id,
     )
 
     current_time = get_current_time()
 
     new_product = {
+        "business_id": business_id,
         "name": product_data.name,
         "price": round(
             float(product_data.price),
@@ -159,6 +235,7 @@ async def create_product(
     ].find_one(
         {
             "_id": result.inserted_id,
+            "business_id": business_id,
         }
     )
 
@@ -171,14 +248,25 @@ async def create_product(
 async def update_product(
     product_id: str,
     product_data: ProductUpdate,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
 ):
-    object_id = validate_product_id(product_id)
+    business_id = get_business_object_id(
+        current_user
+    )
+
+    object_id = validate_product_id(
+        product_id
+    )
 
     existing_product = await database[
         "products"
     ].find_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -190,6 +278,7 @@ async def update_product(
 
     await check_duplicate_name(
         product_data.name,
+        business_id,
         excluded_product_id=object_id,
     )
 
@@ -210,6 +299,7 @@ async def update_product(
     ].update_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         },
         {
             "$set": updated_data,
@@ -221,6 +311,7 @@ async def update_product(
     ].find_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -230,14 +321,27 @@ async def update_product(
 
 
 @router.delete("/{product_id}")
-async def delete_product(product_id: str):
-    object_id = validate_product_id(product_id)
+async def delete_product(
+    product_id: str,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
+    object_id = validate_product_id(
+        product_id
+    )
 
     existing_product = await database[
         "products"
     ].find_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -251,7 +355,12 @@ async def delete_product(product_id: str):
         "orders"
     ].find_one(
         {
-            "status": "open",
+            "business_id": business_id,
+            "status": {
+                "$in": list(
+                    ACTIVE_ORDER_STATUSES
+                ),
+            },
             "items.product_id": product_id,
         }
     )
@@ -271,6 +380,7 @@ async def delete_product(product_id: str):
     ].delete_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -286,14 +396,25 @@ async def delete_product(product_id: str):
 @router.patch("/{product_id}/status")
 async def change_product_status(
     product_id: str,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
 ):
-    object_id = validate_product_id(product_id)
+    business_id = get_business_object_id(
+        current_user
+    )
+
+    object_id = validate_product_id(
+        product_id
+    )
 
     existing_product = await database[
         "products"
     ].find_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -313,6 +434,7 @@ async def change_product_status(
     ].update_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         },
         {
             "$set": {
@@ -327,6 +449,7 @@ async def change_product_status(
     ].find_one(
         {
             "_id": object_id,
+            "business_id": business_id,
         }
     )
 
@@ -339,10 +462,23 @@ async def change_product_status(
     "/seed",
     status_code=status.HTTP_201_CREATED,
 )
-async def seed_products():
+async def seed_products(
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     existing_products_count = await database[
         "products"
-    ].count_documents({})
+    ].count_documents(
+        {
+            "business_id": business_id,
+        }
+    )
 
     if existing_products_count > 0:
         raise HTTPException(
@@ -354,6 +490,7 @@ async def seed_products():
 
     demo_products = [
         {
+            "business_id": business_id,
             "name": "Espresso",
             "price": 0.70,
             "category": "Coffee",
@@ -363,6 +500,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Macchiato e madhe",
             "price": 1.00,
             "category": "Coffee",
@@ -372,6 +510,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Cappuccino",
             "price": 1.50,
             "category": "Coffee",
@@ -381,6 +520,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Ice Latte",
             "price": 2.50,
             "category": "Coffee",
@@ -390,6 +530,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Coca Cola",
             "price": 1.50,
             "category": "Drinks",
@@ -399,6 +540,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Orange Juice",
             "price": 2.00,
             "category": "Drinks",
@@ -408,6 +550,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Burger",
             "price": 4.50,
             "category": "Food",
@@ -417,6 +560,7 @@ async def seed_products():
             "updated_at": current_time,
         },
         {
+            "business_id": business_id,
             "name": "Chocolate Cake",
             "price": 2.80,
             "category": "Desserts",

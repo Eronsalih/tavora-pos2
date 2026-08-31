@@ -1,8 +1,14 @@
+from typing import Annotated
+
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pymongo.errors import DuplicateKeyError
 
 from app.database.mongodb import database
+from app.routers.auth import (
+    get_current_user,
+    require_active_subscription,
+)
 from app.schemas.table import TableCreate, TableUpdate
 from app.services.table_seed import seed_tables
 
@@ -10,7 +16,30 @@ from app.services.table_seed import seed_tables
 router = APIRouter(
     prefix="/api/tables",
     tags=["Tables"],
+    dependencies=[
+        Depends(require_active_subscription),
+    ],
 )
+
+
+def get_business_object_id(
+    current_user: dict,
+) -> ObjectId:
+    business_id = current_user.get("business_id")
+
+    if not business_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Business ID is missing.",
+        )
+
+    if not ObjectId.is_valid(business_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid business ID.",
+        )
+
+    return ObjectId(business_id)
 
 
 def serialize_table(table: dict) -> dict:
@@ -35,9 +64,20 @@ def serialize_table(table: dict) -> dict:
     "",
     status_code=status.HTTP_201_CREATED,
 )
-async def create_table(table: TableCreate):
+async def create_table(
+    table: TableCreate,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     existing_table = await database.tables.find_one(
         {
+            "business_id": business_id,
             "number": table.number,
             "zone": table.zone,
         }
@@ -53,6 +93,7 @@ async def create_table(table: TableCreate):
         )
 
     table_data = table.model_dump()
+    table_data["business_id"] = business_id
 
     try:
         result = await database.tables.insert_one(
@@ -67,6 +108,7 @@ async def create_table(table: TableCreate):
     created_table = await database.tables.find_one(
         {
             "_id": result.inserted_id,
+            "business_id": business_id,
         }
     )
 
@@ -75,13 +117,23 @@ async def create_table(table: TableCreate):
 
 @router.get("")
 async def get_tables(
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
     zone: str | None = Query(default=None),
     table_status: str | None = Query(
         default=None,
         alias="status",
     ),
 ):
-    filters = {}
+    business_id = get_business_object_id(
+        current_user
+    )
+
+    filters = {
+        "business_id": business_id,
+    }
 
     if zone:
         filters["zone"] = zone
@@ -107,8 +159,19 @@ async def get_tables(
 
 
 @router.post("/seed")
-async def seed_all_tables():
-    result = await seed_tables()
+async def seed_all_tables(
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
+    result = await seed_tables(
+        business_id
+    )
 
     return {
         "message": "Tables seeded successfully",
@@ -117,7 +180,17 @@ async def seed_all_tables():
 
 
 @router.get("/{table_id}")
-async def get_table(table_id: str):
+async def get_table(
+    table_id: str,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     if not ObjectId.is_valid(table_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -127,6 +200,7 @@ async def get_table(table_id: str):
     table = await database.tables.find_one(
         {
             "_id": ObjectId(table_id),
+            "business_id": business_id,
         }
     )
 
@@ -143,7 +217,15 @@ async def get_table(table_id: str):
 async def update_table(
     table_id: str,
     table: TableUpdate,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
 ):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     if not ObjectId.is_valid(table_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -155,6 +237,7 @@ async def update_table(
     existing_table = await database.tables.find_one(
         {
             "_id": table_object_id,
+            "business_id": business_id,
         }
     )
 
@@ -189,6 +272,7 @@ async def update_table(
             "_id": {
                 "$ne": table_object_id,
             },
+            "business_id": business_id,
             "number": new_number,
             "zone": new_zone,
         }
@@ -206,6 +290,7 @@ async def update_table(
     await database.tables.update_one(
         {
             "_id": table_object_id,
+            "business_id": business_id,
         },
         {
             "$set": update_data,
@@ -215,6 +300,7 @@ async def update_table(
     updated_table = await database.tables.find_one(
         {
             "_id": table_object_id,
+            "business_id": business_id,
         }
     )
 
@@ -224,8 +310,16 @@ async def update_table(
 @router.patch("/{table_id}/status")
 async def update_table_status(
     table_id: str,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
     table_status: str = Query(alias="status"),
 ):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     allowed_statuses = {
         "free",
         "occupied",
@@ -251,6 +345,7 @@ async def update_table_status(
     table = await database.tables.find_one(
         {
             "_id": table_object_id,
+            "business_id": business_id,
         }
     )
 
@@ -274,6 +369,7 @@ async def update_table_status(
     await database.tables.update_one(
         {
             "_id": table_object_id,
+            "business_id": business_id,
         },
         update_operation,
     )
@@ -281,6 +377,7 @@ async def update_table_status(
     updated_table = await database.tables.find_one(
         {
             "_id": table_object_id,
+            "business_id": business_id,
         }
     )
 
@@ -288,7 +385,17 @@ async def update_table_status(
 
 
 @router.delete("/{table_id}")
-async def delete_table(table_id: str):
+async def delete_table(
+    table_id: str,
+    current_user: Annotated[
+        dict,
+        Depends(get_current_user),
+    ],
+):
+    business_id = get_business_object_id(
+        current_user
+    )
+
     if not ObjectId.is_valid(table_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -298,6 +405,7 @@ async def delete_table(table_id: str):
     result = await database.tables.delete_one(
         {
             "_id": ObjectId(table_id),
+            "business_id": business_id,
         }
     )
 

@@ -1,13 +1,18 @@
+from bson import ObjectId
+
 from app.database.mongodb import database
 
 
-async def seed_tables() -> dict[str, int]:
+async def seed_tables(
+    business_id: ObjectId,
+) -> dict[str, int]:
     tables_to_create = []
 
     # Salla: tavolinat 1 - 10
     for number in range(1, 11):
         tables_to_create.append(
             {
+                "business_id": business_id,
                 "number": number,
                 "zone": "Salla",
                 "seats": 4,
@@ -16,10 +21,11 @@ async def seed_tables() -> dict[str, int]:
             }
         )
 
-    # Terrace: tavolinat 11 - 100
+    # Terrace: tavolinat 11 - 41
     for number in range(11, 101):
         tables_to_create.append(
             {
+                "business_id": business_id,
                 "number": number,
                 "zone": "Terrace",
                 "seats": 4,
@@ -32,6 +38,7 @@ async def seed_tables() -> dict[str, int]:
     for number in range(1, 5):
         tables_to_create.append(
             {
+                "business_id": business_id,
                 "number": number,
                 "zone": "VIP",
                 "seats": 12,
@@ -46,6 +53,7 @@ async def seed_tables() -> dict[str, int]:
     for table in tables_to_create:
         existing_table = await database.tables.find_one(
             {
+                "business_id": business_id,
                 "number": table["number"],
                 "zone": table["zone"],
             }
