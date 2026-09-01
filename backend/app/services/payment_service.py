@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 from bson import ObjectId
 
+from app.core.config import settings
 from app.core.subscription_plans import SUBSCRIPTION_PLANS
 from app.database.mongodb import database
 from app.services.business_service import activate_business_for_days
@@ -128,8 +129,8 @@ async def create_payment(
 
 
 async def create_paddle_transaction(payment: dict[str, Any]) -> dict[str, Any]:
-    api_key = os.getenv("PADDLE_API_KEY")
-    environment = os.getenv("PADDLE_ENVIRONMENT", "sandbox").lower()
+    api_key = settings.paddle_api_key
+    environment = (settings.paddle_environment or "sandbox").lower()
 
     if not api_key:
         raise RuntimeError("PADDLE_API_KEY is not configured.")
@@ -140,19 +141,27 @@ async def create_paddle_transaction(payment: dict[str, Any]) -> dict[str, Any]:
         "monthly",
     )
 
-    if billing_cycle == "yearly":
-        price_env_name = (
-            f"PADDLE_PRICE_ID_{plan_key}_YEARLY"
-        )
-        price_id = os.getenv(price_env_name)
-    else:
-        price_env_name = (
-            f"PADDLE_PRICE_ID_{plan_key}_MONTHLY"
-        )
-        price_id = (
-            os.getenv(price_env_name)
-            or os.getenv(f"PADDLE_PRICE_ID_{plan_key}")
-        )
+    price_env_name = (
+        f"PADDLE_PRICE_ID_{plan_key}_"
+        f"{'YEARLY' if billing_cycle == 'yearly' else 'MONTHLY'}"
+    )
+
+    price_map = {
+        ("STARTER", "monthly"):
+            settings.paddle_price_id_starter_monthly,
+        ("STARTER", "yearly"):
+            settings.paddle_price_id_starter_yearly,
+        ("STANDARD", "monthly"):
+            settings.paddle_price_id_standard_monthly,
+        ("STANDARD", "yearly"):
+            settings.paddle_price_id_standard_yearly,
+        ("PRO", "monthly"):
+            settings.paddle_price_id_pro_monthly,
+        ("PRO", "yearly"):
+            settings.paddle_price_id_pro_yearly,
+    }
+
+    price_id = price_map.get((plan_key, billing_cycle))
 
     if not price_id:
         raise RuntimeError(
@@ -184,7 +193,7 @@ async def create_paddle_transaction(payment: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
-    checkout_base_url = os.getenv("PADDLE_CHECKOUT_BASE_URL")
+    checkout_base_url = settings.paddle_checkout_base_url
 
     if checkout_base_url:
         payload["checkout"] = {"url": checkout_base_url}

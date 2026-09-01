@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from app.core.config import settings
 from app.core.subscription_plans import public_subscription_plans
 from app.routers.auth import get_current_user
 from app.schemas.payment import PaymentCreate, PaymentResponse
@@ -155,7 +156,7 @@ def verify_paddle_signature(
     except ValueError:
         return False
 
-    tolerance = int(os.getenv("PADDLE_WEBHOOK_TOLERANCE_SECONDS", "300"))
+    tolerance = settings.paddle_webhook_tolerance_seconds
 
     if abs(int(time.time()) - timestamp) > tolerance:
         return False
@@ -175,7 +176,7 @@ def verify_paddle_signature(
 
 @router.post("/webhooks/paddle")
 async def paddle_webhook(request: Request):
-    secret = os.getenv("PADDLE_WEBHOOK_SECRET")
+    secret = settings.paddle_webhook_secret
 
     if not secret:
         raise HTTPException(
