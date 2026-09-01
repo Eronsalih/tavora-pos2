@@ -1,47 +1,62 @@
 import { useState } from "react";
+import { ArrowLeft, Building2, LoaderCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+
+import { useAuth } from "../../context/AuthContext";
+import {
+  loginUser,
+  signupUser,
+} from "../../services/authService";
+
 import "./Register.css";
 
-import { signupUser, loginUser } from "../../services/authService";
-import { useAuth } from "../../context/AuthContext";
 
-function Register() {
+const initialForm = {
+  business_name: "",
+  name: "",
+  email: "",
+  password: "",
+  pin: "",
+};
+
+
+export default function Register() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const [formData, setFormData] = useState({
-    business_name: "",
-    name: "",
-    email: "",
-    password: "",
-    pin: "",
-  });
-
+  const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
 
   function handleChange(event) {
     const { name, value } = event.target;
 
-    setFormData((currentData) => ({
-      ...currentData,
-      [name]: value,
+    setForm((current) => ({
+      ...current,
+      [name]:
+        name === "pin"
+          ? value.replace(/\D/g, "").slice(0, 4)
+          : value,
     }));
 
     setError("");
   }
 
+
   async function handleSubmit(event) {
     event.preventDefault();
 
     if (
-      !formData.business_name ||
-      !formData.name ||
-      !formData.email ||
-      !formData.password ||
-      !formData.pin
+      !form.business_name.trim() ||
+      !form.name.trim() ||
+      !form.email.trim() ||
+      !form.password ||
+      !/^\d{4}$/.test(form.pin)
     ) {
-      setError("Plotëso të gjitha fushat.");
+      setError(t("register.validation"));
       return;
     }
 
@@ -50,105 +65,158 @@ function Register() {
       setError("");
 
       await signupUser({
-        business_name: formData.business_name.trim(),
-        name: formData.name.trim(),
-        email: formData.email.trim(),
-        password: formData.password,
-        pin: formData.pin,
+        business_name: form.business_name.trim(),
+        name: form.name.trim(),
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+        pin: form.pin,
       });
 
-      const authenticationData = await loginUser({
-        email: formData.email.trim(),
-        password: formData.password,
+      const authentication = await loginUser({
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
       });
 
-      login(authenticationData);
+      await login(authentication);
 
-      navigate("/", {
+      navigate("/payment-plan", {
         replace: true,
       });
-    } catch (error) {
-      console.error("Registration failed:", error);
+    } catch (requestError) {
+      const detail =
+        requestError.response?.data?.detail;
 
-      setError(error.response?.data?.detail || "Regjistrimi dështoi.");
+      setError(
+        typeof detail === "string"
+          ? detail
+          : requestError.message ||
+              t("register.error"),
+      );
     } finally {
       setLoading(false);
     }
   }
 
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background: "#f5f6fb",
-      }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          width: "100%",
-          maxWidth: "420px",
-          background: "white",
-          padding: "32px",
-          borderRadius: "16px",
-        }}
-      >
-        <h1>Create Tavora Account</h1>
-
-        <input
-          type="text"
-          name="name"
-          placeholder="Emri"
-          value={formData.name}
-          onChange={handleChange}
-        />
-
-        <input
-          type="text"
-          name="business_name"
-          placeholder="Emri i firmës"
-          value={formData.business_name}
-          onChange={handleChange}
-        />
-
-        <input
-          type="email"
-          name="email"
-          placeholder="Email"
-          value={formData.email}
-          onChange={handleChange}
-        />
-
-        <input
-          type="password"
-          name="password"
-          placeholder="Password"
-          value={formData.password}
-          onChange={handleChange}
-        />
-        <input
-          type="password"
-          name="pin"
-          placeholder="PIN 4-shifror"
-          maxLength={4}
-          inputMode="numeric"
-          value={formData.pin}
-          onChange={handleChange}
-        />
-        {error && <p>{error}</p>}
-
-        <button type="submit" disabled={loading}>
-          {loading ? "Creating..." : "Create Account"}
+    <main className="register-page">
+      <section className="register-card">
+        <button
+          type="button"
+          className="register-back"
+          onClick={() => navigate("/login")}
+        >
+          <ArrowLeft size={17} />
+          {t("register.back")}
         </button>
 
-        <button type="button" onClick={() => navigate("/login")}>
-          Back to Login
-        </button>
-      </form>
+        <div className="register-brand">
+          <div className="register-logo">
+            <Building2 size={26} />
+          </div>
+
+          <div>
+            <span>Tavora POS</span>
+            <h1>{t("register.title")}</h1>
+          </div>
+        </div>
+
+        <p className="register-description">
+          {t("register.description")}
+        </p>
+
+        {error && (
+          <div className="register-error">
+            {error}
+          </div>
+        )}
+
+        <form
+          className="register-form"
+          onSubmit={handleSubmit}
+        >
+          <label>
+            <span>{t("register.businessName")}</span>
+            <input
+              name="business_name"
+              value={form.business_name}
+              onChange={handleChange}
+              placeholder={t(
+                "register.businessPlaceholder",
+              )}
+              autoComplete="organization"
+            />
+          </label>
+
+          <label>
+            <span>{t("register.ownerName")}</span>
+            <input
+              name="name"
+              value={form.name}
+              onChange={handleChange}
+              placeholder={t(
+                "register.ownerPlaceholder",
+              )}
+              autoComplete="name"
+            />
+          </label>
+
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              name="email"
+              value={form.email}
+              onChange={handleChange}
+              placeholder="name@example.com"
+              autoComplete="email"
+            />
+          </label>
+
+          <label>
+            <span>{t("register.password")}</span>
+            <input
+              type="password"
+              name="password"
+              value={form.password}
+              onChange={handleChange}
+              minLength={6}
+              autoComplete="new-password"
+            />
+          </label>
+
+          <label>
+            <span>{t("register.adminPin")}</span>
+            <input
+              type="password"
+              inputMode="numeric"
+              name="pin"
+              value={form.pin}
+              onChange={handleChange}
+              maxLength={4}
+              placeholder="••••"
+              autoComplete="off"
+            />
+            <small>{t("register.pinHelp")}</small>
+          </label>
+
+          <button
+            type="submit"
+            className="register-submit"
+            disabled={loading}
+          >
+            {loading && (
+              <LoaderCircle
+                size={18}
+                className="register-spinner"
+              />
+            )}
+            {loading
+              ? t("register.creating")
+              : t("register.create")}
+          </button>
+        </form>
+      </section>
     </main>
   );
 }
-
-export default Register;

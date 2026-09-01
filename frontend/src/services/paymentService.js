@@ -1,16 +1,35 @@
 import api from "./api";
 
-export async function createSubscriptionPayment({
-  plan = "pro_monthly",
-  currency = "EUR",
-} = {}) {
-  const response = await api.post("/api/payments/create", {
+
+export async function getSubscriptionPlans() {
+  const response = await api.get("/api/payments/plans");
+  return response.data;
+}
+
+
+export async function createSubscriptionPayment(
+  plan,
+  provider = "paddle",
+  billingCycle = "monthly",
+) {
+  const response = await api.post("/api/payments", {
     plan,
-    currency,
+    provider,
+    billing_cycle: billingCycle,
   });
 
   return response.data;
 }
+
+
+export async function getPayment(paymentId) {
+  const response = await api.get(
+    `/api/payments/${paymentId}`,
+  );
+
+  return response.data;
+}
+
 
 export async function simulatePaymentSuccess(paymentId) {
   const response = await api.post(

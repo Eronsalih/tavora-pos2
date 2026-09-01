@@ -1,18 +1,17 @@
-import re
 from datetime import datetime, timezone
 from typing import Annotated
 
 from bson import ObjectId
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Query,
-    status,
-)
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.database.mongodb import database
 from app.routers.auth import get_current_user
+from app.schemas.payment import ManualSubscriptionUpdate
+from app.services.business_service import (
+    activate_business_for_days,
+    set_business_enabled,
+    set_business_subscription_status,
+)
 
 
 router = APIRouter(
@@ -21,882 +20,379 @@ router = APIRouter(
 )
 
 
-# =========================================================
-# COLLECTIONS
-# =========================================================
-
-
-businesses_collection = database[
-    "businesses"
-]
-
-users_collection = database[
-    "users"
-]
-
-payments_collection = database[
-    "payments"
-]
-
-products_collection = database[
-    "products"
-]
-
-tables_collection = database[
-    "tables"
-]
-
-orders_collection = database[
-    "orders"
-]
-
-
-# =========================================================
-# SUPERADMIN GUARD
-# =========================================================
-
-
 async def require_superadmin(
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ) -> dict:
-    if current_user.get(
-        "role"
-    ) != "superadmin":
+    if current_user.get("role") != "superadmin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Tavora owner access is required."
-            ),
+            detail="Tavora owner access is required.",
         )
 
     return current_user
 
 
-# =========================================================
-# HELPERS
-# =========================================================
-
-
-def serialize_datetime(
-    value,
-):
+def serialize_datetime(value):
     if value is None:
         return None
-
-    if isinstance(
-        value,
-        datetime,
-    ):
-        return value.isoformat()
-
-    return str(value)
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
-def serialize_business(
-    business: dict,
-) -> dict:
+def serialize_business(business: dict) -> dict:
     return {
-        "id": str(
-            business["_id"]
+        "id": str(business["_id"]),
+        "name": business.get("name", ""),
+        "owner_name": business.get("owner_name", ""),
+        "email": business.get("email", ""),
+        "phone": business.get("phone"),
+        "country": business.get("country"),
+        "is_active": business.get("is_active", True),
+        "subscription_plan": business.get("subscription_plan", "none"),
+        "subscription_status": business.get("subscription_status", "inactive"),
+        "subscription_started_at": serialize_datetime(
+            business.get("subscription_started_at")
         ),
-        "name": business.get(
-            "name",
-            "",
+        "subscription_expires_at": serialize_datetime(
+            business.get("subscription_expires_at")
         ),
-        "owner_name": business.get(
-            "owner_name",
-            "",
-        ),
-        "email": business.get(
-            "email",
-            "",
-        ),
-        "phone": business.get(
-            "phone"
-        ),
-        "country": business.get(
-            "country"
-        ),
-        "is_active": business.get(
-            "is_active",
-            True,
-        ),
-        "subscription_plan": (
-            business.get(
-                "subscription_plan",
-                "none",
-            )
-        ),
-        "subscription_status": (
-            business.get(
-                "subscription_status",
-                "inactive",
-            )
-        ),
-        "subscription_started_at": (
-            serialize_datetime(
-                business.get(
-                    "subscription_started_at"
-                )
-            )
-        ),
-        "subscription_expires_at": (
-            serialize_datetime(
-                business.get(
-                    "subscription_expires_at"
-                )
-            )
-        ),
-        "payment_provider": (
-            business.get(
-                "payment_provider"
-            )
-        ),
-        "created_at": (
-            serialize_datetime(
-                business.get(
-                    "created_at"
-                )
-            )
-        ),
-        "updated_at": (
-            serialize_datetime(
-                business.get(
-                    "updated_at"
-                )
-            )
-        ),
+        "payment_provider": business.get("payment_provider"),
+        "created_at": serialize_datetime(business.get("created_at")),
+        "updated_at": serialize_datetime(business.get("updated_at")),
     }
 
 
-def serialize_payment(
-    payment: dict,
-    business_name: str | None = None,
-) -> dict:
-    amount_minor = int(
-        payment.get(
-            "amount_minor",
-            0,
-        )
-        or 0
-    )
-
+def serialize_payment(payment: dict, business_name: str | None = None) -> dict:
+    amount_minor = int(payment.get("amount_minor", 0))
     return {
-        "id": str(
-            payment["_id"]
-        ),
-        "business_id": str(
-            payment.get(
-                "business_id"
-            )
-        ),
-        "business_name": (
-            business_name
-        ),
-        "amount_minor": (
-            amount_minor
-        ),
-        "currency": payment.get(
-            "currency"
-        ),
-        "plan": payment.get(
-            "plan"
-        ),
-        "provider": payment.get(
-            "provider"
-        ),
-        "provider_payment_id": (
-            payment.get(
-                "provider_payment_id"
-            )
-        ),
-        "status": payment.get(
-            "status"
-        ),
-        "created_at": (
-            serialize_datetime(
-                payment.get(
-                    "created_at"
-                )
-            )
-        ),
-        "updated_at": (
-            serialize_datetime(
-                payment.get(
-                    "updated_at"
-                )
-            )
-        ),
-        "paid_at": (
-            serialize_datetime(
-                payment.get(
-                    "paid_at"
-                )
-            )
-        ),
+        "id": str(payment["_id"]),
+        "business_id": str(payment.get("business_id")),
+        "business_name": business_name,
+        "amount_minor": amount_minor,
+        "amount": round(amount_minor / 100, 2),
+        "currency": payment.get("currency", "EUR"),
+        "plan": payment.get("plan"),
+        "provider": payment.get("provider"),
+        "provider_payment_id": payment.get("provider_payment_id"),
+        "status": payment.get("status"),
+        "created_at": serialize_datetime(payment.get("created_at")),
+        "updated_at": serialize_datetime(payment.get("updated_at")),
+        "paid_at": serialize_datetime(payment.get("paid_at")),
     }
 
 
-async def get_business_name(
-    business_id,
-) -> str | None:
-    if isinstance(
-        business_id,
-        ObjectId,
-    ):
-        business_object_id = (
-            business_id
+def validate_business_id(business_id: str) -> ObjectId:
+    if not ObjectId.is_valid(business_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid business ID.",
         )
-
-    elif ObjectId.is_valid(
-        str(business_id)
-    ):
-        business_object_id = ObjectId(
-            str(business_id)
-        )
-
-    else:
-        return None
-
-    business = await businesses_collection.find_one(
-        {
-            "_id": business_object_id,
-        },
-        {
-            "name": 1,
-        },
-    )
-
-    if not business:
-        return None
-
-    return business.get(
-        "name"
-    )
+    return ObjectId(business_id)
 
 
-# =========================================================
-# DASHBOARD
-# =========================================================
-
-
-@router.get(
-    "/dashboard"
-)
+@router.get("/dashboard")
 async def get_platform_dashboard(
-    _: Annotated[
-        dict,
-        Depends(require_superadmin),
-    ],
+    _: Annotated[dict, Depends(require_superadmin)],
 ):
-    now = datetime.now(
-        timezone.utc
+    now = datetime.now(timezone.utc)
+
+    total_businesses = await database["businesses"].count_documents({})
+    enabled_businesses = await database["businesses"].count_documents(
+        {"is_active": {"$ne": False}}
     )
-
-    month_start = datetime(
-        year=now.year,
-        month=now.month,
-        day=1,
-        tzinfo=timezone.utc,
-    )
-
-    total_businesses = (
-        await businesses_collection.count_documents(
-            {}
-        )
-    )
-
-    enabled_businesses = (
-        await businesses_collection.count_documents(
-            {
-                "is_active": {
-                    "$ne": False,
-                }
-            }
-        )
-    )
-
-    disabled_businesses = (
-        await businesses_collection.count_documents(
-            {
-                "is_active": False,
-            }
-        )
-    )
-
-    active_subscriptions = (
-        await businesses_collection.count_documents(
-            {
-                "subscription_status": (
-                    "active"
-                ),
-                "subscription_expires_at": {
-                    "$gt": now,
-                },
-            }
-        )
-    )
-
-    inactive_subscriptions = (
-        total_businesses
-        - active_subscriptions
-    )
-
-    paid_payments = (
-        await payments_collection.count_documents(
-            {
-                "status": "paid",
-            }
-        )
-    )
-
-    pending_payments = (
-        await payments_collection.count_documents(
-            {
-                "status": "pending",
-            }
-        )
-    )
-
-    # -----------------------------------------------------
-    # TOTAL REVENUE BY CURRENCY
-    # -----------------------------------------------------
-
-    revenue_pipeline = [
+    active_subscriptions = await database["businesses"].count_documents(
         {
-            "$match": {
-                "status": "paid",
-            }
-        },
+            "subscription_status": "active",
+            "subscription_expires_at": {"$gt": now},
+        }
+    )
+    paid_payments_count = await database["payments"].count_documents(
+        {"status": "paid"}
+    )
+
+    revenue_by_currency = []
+
+    pipeline = [
+        {"$match": {"status": "paid"}},
         {
             "$group": {
                 "_id": "$currency",
-                "total_minor": {
-                    "$sum": "$amount_minor",
-                },
-                "payments_count": {
-                    "$sum": 1,
-                },
+                "total_minor": {"$sum": "$amount_minor"},
+                "payments": {"$sum": 1},
             }
         },
-        {
-            "$sort": {
-                "_id": 1,
-            }
-        },
+        {"$sort": {"_id": 1}},
     ]
 
-    total_revenue_by_currency = []
-
-    async for result in payments_collection.aggregate(
-        revenue_pipeline
-    ):
-        total_revenue_by_currency.append(
+    async for item in database["payments"].aggregate(pipeline):
+        total_minor = int(item.get("total_minor", 0))
+        revenue_by_currency.append(
             {
-                "currency": result.get(
-                    "_id"
-                ),
-                "total_minor": int(
-                    result.get(
-                        "total_minor",
-                        0,
-                    )
-                ),
-                "payments_count": (
-                    result.get(
-                        "payments_count",
-                        0,
-                    )
-                ),
+                "currency": item.get("_id") or "EUR",
+                "total_minor": total_minor,
+                "total": round(total_minor / 100, 2),
+                "payments": int(item.get("payments", 0)),
             }
         )
 
-    # -----------------------------------------------------
-    # CURRENT MONTH REVENUE
-    # -----------------------------------------------------
-
-    monthly_revenue_pipeline = [
-        {
-            "$match": {
-                "status": "paid",
-                "paid_at": {
-                    "$gte": month_start,
-                },
-            }
-        },
-        {
-            "$group": {
-                "_id": "$currency",
-                "total_minor": {
-                    "$sum": "$amount_minor",
-                },
-                "payments_count": {
-                    "$sum": 1,
-                },
-            }
-        },
-        {
-            "$sort": {
-                "_id": 1,
-            }
-        },
-    ]
-
-    monthly_revenue_by_currency = []
-
-    async for result in payments_collection.aggregate(
-        monthly_revenue_pipeline
-    ):
-        monthly_revenue_by_currency.append(
-            {
-                "currency": result.get(
-                    "_id"
-                ),
-                "total_minor": int(
-                    result.get(
-                        "total_minor",
-                        0,
-                    )
-                ),
-                "payments_count": (
-                    result.get(
-                        "payments_count",
-                        0,
-                    )
-                ),
-            }
-        )
+    complimentary_count = await database["orders"].count_documents(
+        {"payment_method": "complimentary"}
+    )
 
     return {
-        "total_businesses": (
-            total_businesses
-        ),
-        "enabled_businesses": (
-            enabled_businesses
-        ),
-        "disabled_businesses": (
-            disabled_businesses
-        ),
-        "active_subscriptions": (
-            active_subscriptions
-        ),
-        "inactive_subscriptions": (
-            inactive_subscriptions
-        ),
-        "paid_payments": (
-            paid_payments
-        ),
-        "pending_payments": (
-            pending_payments
-        ),
-        "total_revenue_by_currency": (
-            total_revenue_by_currency
-        ),
-        "monthly_revenue_by_currency": (
-            monthly_revenue_by_currency
-        ),
+        "total_businesses": total_businesses,
+        "enabled_businesses": enabled_businesses,
+        "active_subscriptions": active_subscriptions,
+        "expired_or_unpaid": max(total_businesses - active_subscriptions, 0),
+        "paid_payments_count": paid_payments_count,
+        "complimentary_orders_count": complimentary_count,
+        "revenue_by_currency": revenue_by_currency,
     }
 
 
-# =========================================================
-# BUSINESSES LIST
-# =========================================================
-
-
-@router.get(
-    "/businesses"
-)
+@router.get("/businesses")
 async def get_platform_businesses(
-    _: Annotated[
-        dict,
-        Depends(require_superadmin),
-    ],
-    search: str | None = Query(
-        default=None,
-    ),
-    subscription_status: str | None = Query(
-        default=None,
-    ),
+    _: Annotated[dict, Depends(require_superadmin)],
+    search: str | None = Query(default=None),
+    subscription_status: str | None = Query(default=None),
 ):
     query: dict = {}
 
     if subscription_status:
-        query[
-            "subscription_status"
-        ] = subscription_status
+        query["subscription_status"] = subscription_status
 
     if search and search.strip():
-        safe_search = re.escape(
-            search.strip()
-        )
-
+        value = search.strip()
         query["$or"] = [
-            {
-                "name": {
-                    "$regex": safe_search,
-                    "$options": "i",
-                }
-            },
-            {
-                "owner_name": {
-                    "$regex": safe_search,
-                    "$options": "i",
-                }
-            },
-            {
-                "email": {
-                    "$regex": safe_search,
-                    "$options": "i",
-                }
-            },
+            {"name": {"$regex": value, "$options": "i"}},
+            {"owner_name": {"$regex": value, "$options": "i"}},
+            {"email": {"$regex": value, "$options": "i"}},
         ]
 
-    businesses = []
+    result = []
 
-    cursor = businesses_collection.find(
-        query
-    ).sort(
-        "created_at",
-        -1,
-    )
+    cursor = database["businesses"].find(query).sort("created_at", -1)
 
     async for business in cursor:
-        business_id = business[
-            "_id"
-        ]
-
-        business_data = (
-            serialize_business(
-                business
-            )
+        item = serialize_business(business)
+        item["users_count"] = await database["users"].count_documents(
+            {"business_id": business["_id"]}
         )
 
-        business_data[
-            "users_count"
-        ] = await users_collection.count_documents(
-            {
-                "business_id": (
-                    business_id
-                ),
-            }
+        latest_payment = await database["payments"].find_one(
+            {"business_id": business["_id"]},
+            sort=[("created_at", -1)],
         )
 
-        latest_payment = (
-            await payments_collection.find_one(
-                {
-                    "business_id": (
-                        business_id
-                    ),
-                },
-                sort=[
-                    (
-                        "created_at",
-                        -1,
-                    )
-                ],
-            )
+        item["latest_payment"] = (
+            serialize_payment(latest_payment, business.get("name"))
+            if latest_payment
+            else None
         )
 
-        if latest_payment:
-            business_data[
-                "latest_payment"
-            ] = serialize_payment(
-                latest_payment,
-                business_name=business.get(
-                    "name"
-                ),
-            )
+        result.append(item)
 
-        else:
-            business_data[
-                "latest_payment"
-            ] = None
-
-        businesses.append(
-            business_data
-        )
-
-    return businesses
+    return result
 
 
-# =========================================================
-# BUSINESS DETAILS
-# =========================================================
-
-
-@router.get(
-    "/businesses/{business_id}"
-)
+@router.get("/businesses/{business_id}")
 async def get_platform_business(
     business_id: str,
-    _: Annotated[
-        dict,
-        Depends(require_superadmin),
-    ],
+    _: Annotated[dict, Depends(require_superadmin)],
 ):
-    if not ObjectId.is_valid(
-        business_id
-    ):
+    object_id = validate_business_id(business_id)
+
+    business = await database["businesses"].find_one({"_id": object_id})
+
+    if not business:
         raise HTTPException(
-            status_code=(
-                status.HTTP_400_BAD_REQUEST
-            ),
-            detail=(
-                "Invalid business ID."
-            ),
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business was not found.",
         )
 
-    business_object_id = ObjectId(
-        business_id
+    result = serialize_business(business)
+    result["users"] = [
+        {
+            "id": str(user["_id"]),
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "role": user.get("role"),
+            "is_active": user.get("is_active", True),
+        }
+        async for user in database["users"].find(
+            {"business_id": object_id}
+        ).sort("created_at", 1)
+    ]
+
+    return result
+
+
+@router.get("/payments")
+async def get_platform_payments(
+    _: Annotated[dict, Depends(require_superadmin)],
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    payments = await database["payments"].find({}).sort(
+        "created_at", -1
+    ).limit(limit).to_list(length=limit)
+
+    business_ids = {
+        payment.get("business_id")
+        for payment in payments
+        if payment.get("business_id")
+    }
+
+    businesses = await database["businesses"].find(
+        {"_id": {"$in": list(business_ids)}}
+    ).to_list(length=None)
+
+    names = {
+        business["_id"]: business.get("name")
+        for business in businesses
+    }
+
+    return [
+        serialize_payment(
+            payment,
+            names.get(payment.get("business_id")),
+        )
+        for payment in payments
+    ]
+
+
+@router.patch("/businesses/{business_id}/enabled")
+async def update_business_enabled(
+    business_id: str,
+    enabled: bool,
+    current_user: Annotated[dict, Depends(require_superadmin)],
+):
+    validate_business_id(business_id)
+
+    business = await set_business_enabled(business_id, enabled)
+
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business was not found.",
+        )
+
+    await database["audit_logs"].insert_one(
+        {
+            "type": "platform_business_enabled_changed",
+            "business_id": ObjectId(business_id),
+            "enabled": enabled,
+            "performed_by_user_id": current_user["id"],
+            "performed_by_name": current_user["name"],
+            "created_at": datetime.now(timezone.utc),
+        }
     )
 
-    business = (
-        await businesses_collection.find_one(
-            {
-                "_id": business_object_id,
-            }
-        )
+    return business
+
+
+@router.post("/businesses/{business_id}/activate")
+async def activate_business_manually(
+    business_id: str,
+    data: ManualSubscriptionUpdate,
+    current_user: Annotated[dict, Depends(require_superadmin)],
+):
+    validate_business_id(business_id)
+
+    business = await activate_business_for_days(
+        business_id=business_id,
+        plan=data.plan,
+        payment_provider="owner_manual",
+        duration_days=data.duration_days,
     )
 
     if not business:
         raise HTTPException(
-            status_code=(
-                status.HTTP_404_NOT_FOUND
-            ),
-            detail=(
-                "Business was not found."
-            ),
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business was not found.",
         )
 
-    business_data = (
-        serialize_business(
-            business
-        )
+    await database["audit_logs"].insert_one(
+        {
+            "type": "platform_subscription_manual_activation",
+            "business_id": ObjectId(business_id),
+            "plan": data.plan,
+            "duration_days": data.duration_days,
+            "note": data.note,
+            "performed_by_user_id": current_user["id"],
+            "performed_by_name": current_user["name"],
+            "created_at": datetime.now(timezone.utc),
+        }
     )
 
-    business_data["counts"] = {
-        "users": (
-            await users_collection.count_documents(
-                {
-                    "business_id": (
-                        business_object_id
-                    ),
-                }
-            )
-        ),
-        "products": (
-            await products_collection.count_documents(
-                {
-                    "business_id": (
-                        business_object_id
-                    ),
-                }
-            )
-        ),
-        "tables": (
-            await tables_collection.count_documents(
-                {
-                    "business_id": (
-                        business_object_id
-                    ),
-                }
-            )
-        ),
-        "orders": (
-            await orders_collection.count_documents(
-                {
-                    "business_id": (
-                        business_object_id
-                    ),
-                }
-            )
-        ),
-    }
+    return business
 
-    recent_payments = []
 
-    payment_cursor = (
-        payments_collection.find(
-            {
-                "business_id": (
-                    business_object_id
-                ),
-            }
+@router.patch("/businesses/{business_id}/subscription-status")
+async def update_subscription_status(
+    business_id: str,
+    subscription_status: str,
+    current_user: Annotated[dict, Depends(require_superadmin)],
+):
+    if subscription_status not in {"active", "inactive", "past_due", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid subscription status.",
         )
-        .sort(
-            "created_at",
-            -1,
-        )
-        .limit(
-            10
-        )
+
+    validate_business_id(business_id)
+
+    business = await set_business_subscription_status(
+        business_id,
+        subscription_status,
     )
 
-    async for payment in payment_cursor:
-        recent_payments.append(
-            serialize_payment(
-                payment,
-                business_name=business.get(
-                    "name"
-                ),
-            )
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business was not found.",
         )
 
-    business_data[
-        "recent_payments"
-    ] = recent_payments
+    await database["audit_logs"].insert_one(
+        {
+            "type": "platform_subscription_status_changed",
+            "business_id": ObjectId(business_id),
+            "subscription_status": subscription_status,
+            "performed_by_user_id": current_user["id"],
+            "performed_by_name": current_user["name"],
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
 
-    return business_data
+    return business
 
 
-# =========================================================
-# SUBSCRIPTIONS
-# =========================================================
-
-
-@router.get(
-    "/subscriptions"
-)
-async def get_platform_subscriptions(
-    _: Annotated[
-        dict,
-        Depends(require_superadmin),
-    ],
-    subscription_status: str | None = Query(
-        default=None,
-        alias="status",
-    ),
+@router.get("/audit")
+async def get_platform_audit(
+    _: Annotated[dict, Depends(require_superadmin)],
+    business_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
 ):
     query: dict = {}
 
-    if subscription_status:
-        query[
-            "subscription_status"
-        ] = subscription_status
+    if business_id:
+        query["business_id"] = validate_business_id(business_id)
 
-    subscriptions = []
+    logs = await database["audit_logs"].find(query).sort(
+        "created_at", -1
+    ).limit(limit).to_list(length=limit)
 
-    cursor = businesses_collection.find(
-        query
-    ).sort(
-        "created_at",
-        -1,
-    )
+    result = []
 
-    async for business in cursor:
-        subscriptions.append(
-            {
-                "business_id": str(
-                    business["_id"]
-                ),
-                "business_name": (
-                    business.get(
-                        "name"
-                    )
-                ),
-                "owner_name": (
-                    business.get(
-                        "owner_name"
-                    )
-                ),
-                "email": business.get(
-                    "email"
-                ),
-                "plan": business.get(
-                    "subscription_plan",
-                    "none",
-                ),
-                "status": business.get(
-                    "subscription_status",
-                    "inactive",
-                ),
-                "started_at": (
-                    serialize_datetime(
-                        business.get(
-                            "subscription_started_at"
-                        )
-                    )
-                ),
-                "expires_at": (
-                    serialize_datetime(
-                        business.get(
-                            "subscription_expires_at"
-                        )
-                    )
-                ),
-                "payment_provider": (
-                    business.get(
-                        "payment_provider"
-                    )
-                ),
-            }
-        )
+    for log in logs:
+        item = {
+            key: serialize_datetime(value)
+            if isinstance(value, datetime)
+            else str(value)
+            if isinstance(value, ObjectId)
+            else value
+            for key, value in log.items()
+            if key != "_id"
+        }
+        item["id"] = str(log["_id"])
+        result.append(item)
 
-    return subscriptions
-
-
-# =========================================================
-# PAYMENTS
-# =========================================================
-
-
-@router.get(
-    "/payments"
-)
-async def get_platform_payments(
-    _: Annotated[
-        dict,
-        Depends(require_superadmin),
-    ],
-    payment_status: str | None = Query(
-        default=None,
-        alias="status",
-    ),
-    limit: int = Query(
-        default=100,
-        ge=1,
-        le=200,
-    ),
-):
-    query: dict = {}
-
-    if payment_status:
-        query[
-            "status"
-        ] = payment_status
-
-    payments = []
-
-    cursor = (
-        payments_collection.find(
-            query
-        )
-        .sort(
-            "created_at",
-            -1,
-        )
-        .limit(
-            limit
-        )
-    )
-
-    async for payment in cursor:
-        business_name = (
-            await get_business_name(
-                payment.get(
-                    "business_id"
-                )
-            )
-        )
-
-        payments.append(
-            serialize_payment(
-                payment,
-                business_name=business_name,
-            )
-        )
-
-    return payments
+    return result

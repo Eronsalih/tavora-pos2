@@ -4,13 +4,16 @@ from typing import Annotated
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.database.mongodb import database
-from app.routers.auth import (
-    get_current_user,
-    require_active_subscription,
+from app.core.security import verify_password
+from app.core.subscription_access import (
+    require_pro_plan,
+    require_standard_plan,
 )
+from app.database.mongodb import database
+from app.routers.auth import get_current_user, require_active_subscription
 from app.schemas.order import (
     OrderAddItems,
+    OrderComplimentaryRelease,
     OrderCreate,
     OrderPayment,
     OrderStatusUpdate,
@@ -23,33 +26,8 @@ from app.schemas.order import (
 router = APIRouter(
     prefix="/api/orders",
     tags=["Orders"],
-    dependencies=[
-        Depends(require_active_subscription),
-    ],
+    dependencies=[Depends(require_active_subscription)],
 )
-
-
-ORDER_STATUS_TRANSITIONS = {
-    "draft": {
-        "sent_to_kitchen",
-        "paid",
-        "cancelled",
-    },
-    "sent_to_kitchen": {
-        "preparing",
-        "paid",
-        "cancelled",
-    },
-    "preparing": {
-        "ready",
-        "paid",
-    },
-    "ready": {
-        "paid",
-    },
-    "paid": set(),
-    "cancelled": set(),
-}
 
 
 ACTIVE_ORDER_STATUSES = {
@@ -59,22 +37,12 @@ ACTIVE_ORDER_STATUSES = {
     "ready",
 }
 
-
-PAYABLE_ORDER_STATUSES = {
-    "draft",
-    "sent_to_kitchen",
-    "preparing",
-    "ready",
-}
-
-
-CANCELLABLE_ORDER_STATUSES = {
-    "draft",
-    "sent_to_kitchen",
-}
-
+PAYABLE_ORDER_STATUSES = ACTIVE_ORDER_STATUSES
+CANCELLABLE_ORDER_STATUSES = {"draft", "sent_to_kitchen"}
 
 KITCHEN_CATEGORIES = {
+    "Food",
+    "Desserts",
     "Breakfast",
     "Soups",
     "Salads",
@@ -86,434 +54,415 @@ KITCHEN_CATEGORIES = {
     "Sandwiches",
     "Traditional Food",
     "Side Dishes",
-    "Desserts",
-    "Food",
 }
 
-
 BAR_CATEGORIES = {
+    "Coffee",
+    "Drinks",
     "Hot Drinks",
     "Cold Drinks",
     "Alcohol",
     "Cocktails",
-    "Coffee",
-    "Drinks",
 }
 
 
-def get_business_object_id(
-    current_user: dict,
-) -> ObjectId:
+def get_business_object_id(current_user: dict) -> ObjectId:
     business_id = current_user.get("business_id")
 
-    if not business_id:
+    if not business_id or not ObjectId.is_valid(business_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Business ID is missing.",
-        )
-
-    if not ObjectId.is_valid(business_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid business ID.",
+            detail="Valid business ID is required.",
         )
 
     return ObjectId(business_id)
-
-
-def get_order_object_id(
-    order_id: str,
-) -> ObjectId:
-    if not ObjectId.is_valid(order_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid order ID.",
-        )
-
-    return ObjectId(order_id)
 
 
 def serialize_datetime(value):
     if value is None:
         return None
 
-    if not hasattr(value, "isoformat"):
-        return value
+    if hasattr(value, "isoformat"):
+        if getattr(value, "tzinfo", None) is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
 
-    if value.tzinfo is None:
-        value = value.replace(
-            tzinfo=timezone.utc,
-        )
-
-    return value.isoformat()
+    return value
 
 
-def serialize_order(
-    order: dict,
-) -> dict:
+def serialize_order(order: dict) -> dict:
     return {
         "id": str(order["_id"]),
+        "business_id": str(order["business_id"]),
         "table_id": str(order["table_id"]),
-        "table_number": order["table_number"],
-        "table_zone": order["table_zone"],
-        "opened_by_user_id": order.get(
-            "opened_by_user_id",
+        "table_number": order.get("table_number"),
+        "table_zone": order.get("table_zone"),
+        "opened_by_user_id": order.get("opened_by_user_id"),
+        "opened_by_name": order.get("opened_by_name"),
+        "opened_by_role": order.get("opened_by_role"),
+        "items": order.get("items", []),
+        "total_items": int(order.get("total_items", 0)),
+        "total": round(float(order.get("total", 0)), 2),
+        "status": order.get("status", "draft"),
+        "kitchen_status": order.get("kitchen_status"),
+        "bar_status": order.get("bar_status"),
+        "payment_method": order.get("payment_method"),
+        "paid_by_user_id": order.get("paid_by_user_id"),
+        "paid_by_name": order.get("paid_by_name"),
+        "paid_by_role": order.get("paid_by_role"),
+        "stock_deducted": order.get("stock_deducted", False),
+        "stock_restored": order.get("stock_restored", False),
+        "complimentary_original_total": order.get("complimentary_original_total"),
+        "complimentary_reason": order.get("complimentary_reason"),
+        "complimentary_authorized_by_user_id": order.get(
+            "complimentary_authorized_by_user_id"
         ),
-        "opened_by_name": order.get(
-            "opened_by_name",
+        "complimentary_authorized_by_name": order.get(
+            "complimentary_authorized_by_name"
         ),
-        "opened_by_role": order.get(
-            "opened_by_role",
-        ),
-        "items": order.get(
-            "items",
-            [],
-        ),
-        "total_items": order.get(
-            "total_items",
-            0,
-        ),
-        "total": order.get(
-            "total",
-            0,
-        ),
-        "status": order.get(
-            "status",
-            "draft",
-        ),
-        "kitchen_status": order.get(
-            "kitchen_status",
-        ),
-        "bar_status": order.get(
-            "bar_status",
-        ),
-        "payment_method": order.get(
-            "payment_method",
-        ),
-        "paid_by_user_id": order.get(
-            "paid_by_user_id",
-        ),
-        "paid_by_name": order.get(
-            "paid_by_name",
-        ),
-        "paid_by_role": order.get(
-            "paid_by_role",
-        ),
-        "stock_deducted": order.get(
-            "stock_deducted",
-            False,
-        ),
-        "stock_restored": order.get(
-            "stock_restored",
-            False,
-        ),
-        "created_at": serialize_datetime(
-            order.get("created_at"),
-        ),
-        "updated_at": serialize_datetime(
-            order.get("updated_at"),
-        ),
-        "sent_to_kitchen_at": serialize_datetime(
-            order.get("sent_to_kitchen_at"),
-        ),
-        "preparing_at": serialize_datetime(
-            order.get("preparing_at"),
-        ),
-        "ready_at": serialize_datetime(
-            order.get("ready_at"),
-        ),
-        "paid_at": serialize_datetime(
-            order.get("paid_at"),
-        ),
-        "cancelled_at": serialize_datetime(
-            order.get("cancelled_at"),
-        ),
-        "stock_deducted_at": serialize_datetime(
-            order.get("stock_deducted_at"),
-        ),
-        "stock_restored_at": serialize_datetime(
-            order.get("stock_restored_at"),
-        ),
+        "created_at": serialize_datetime(order.get("created_at")),
+        "updated_at": serialize_datetime(order.get("updated_at")),
+        "sent_to_kitchen_at": serialize_datetime(order.get("sent_to_kitchen_at")),
+        "preparing_at": serialize_datetime(order.get("preparing_at")),
+        "ready_at": serialize_datetime(order.get("ready_at")),
+        "paid_at": serialize_datetime(order.get("paid_at")),
+        "cancelled_at": serialize_datetime(order.get("cancelled_at")),
+        "stock_deducted_at": serialize_datetime(order.get("stock_deducted_at")),
+        "stock_restored_at": serialize_datetime(order.get("stock_restored_at")),
     }
 
 
-async def get_order_document(
-    order_id: ObjectId,
-    business_id: ObjectId,
-) -> dict | None:
-    return await database["orders"].find_one(
-        {
-            "_id": order_id,
-            "business_id": business_id,
-        }
+def order_has_kitchen_items(order: dict) -> bool:
+    return any(
+        item.get("category") in KITCHEN_CATEGORIES
+        for item in order.get("items", [])
     )
+
+
+def order_has_bar_items(order: dict) -> bool:
+    return any(
+        item.get("category") in BAR_CATEGORIES
+        for item in order.get("items", [])
+    )
+
+
+def filter_items_by_categories(order: dict, categories: set[str]) -> dict:
+    filtered_items = [
+        item
+        for item in order.get("items", [])
+        if item.get("category") in categories
+    ]
+
+    result = serialize_order(order)
+    result["items"] = filtered_items
+    result["total_items"] = sum(
+        int(item.get("quantity", 0)) for item in filtered_items
+    )
+    return result
 
 
 async def prepare_order_items(
     items,
     business_id: ObjectId,
-) -> tuple[list, int, float]:
+) -> tuple[list[dict], int, float]:
     if not items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Order must contain at least one product."
-            ),
+            detail="Order must contain at least one product.",
         )
 
-    products_collection = database[
-        "products"
-    ]
-
-    prepared_items = []
+    prepared_items: list[dict] = []
     total_items = 0
     order_total = 0.0
 
     for item in items:
-        if not ObjectId.is_valid(
-            item.product_id,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Invalid product ID: "
-                    f"{item.product_id}"
-                ),
-            )
-
-        product = (
-            await products_collection.find_one(
-                {
-                    "_id": ObjectId(
-                        item.product_id,
-                    ),
-                    "business_id": business_id,
-                    "is_active": {
-                        "$ne": False,
-                    },
-                }
-            )
+        product = await database["products"].find_one(
+            {
+                "_id": ObjectId(item.product_id),
+                "business_id": business_id,
+                "is_active": {"$ne": False},
+            }
         )
 
         if not product:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"Product not found: "
-                    f"{item.product_id}"
-                ),
+                detail=f"Product not found: {item.product_id}",
             )
 
-        product_price = float(
-            product["price"],
-        )
-
-        subtotal = round(
-            product_price * item.quantity,
-            2,
-        )
+        quantity = int(item.quantity)
+        price = float(product.get("price", 0))
+        subtotal = round(price * quantity, 2)
 
         prepared_items.append(
             {
-                "product_id": str(
-                    product["_id"],
-                ),
-                "name": product["name"],
-                "category": product.get(
-                    "category",
-                    "Other",
-                ),
-                "price": product_price,
-                "quantity": item.quantity,
+                "product_id": str(product["_id"]),
+                "name": product.get("name", ""),
+                "category": product.get("category", "Other"),
+                "price": price,
+                "quantity": quantity,
                 "subtotal": subtotal,
             }
         )
 
-        total_items += item.quantity
+        total_items += quantity
         order_total += subtotal
 
-    return (
-        prepared_items,
-        total_items,
-        round(order_total, 2),
-    )
+    return prepared_items, total_items, round(order_total, 2)
 
 
-def order_has_kitchen_items(
-    order: dict,
-) -> bool:
-    return any(
-        item.get("category")
-        in KITCHEN_CATEGORIES
-        for item in order.get(
-            "items",
-            [],
-        )
-    )
-
-
-def order_has_bar_items(
-    order: dict,
-) -> bool:
-    return any(
-        item.get("category")
-        in BAR_CATEGORIES
-        for item in order.get(
-            "items",
-            [],
-        )
-    )
-
-
-def filter_items_by_categories(
-    order: dict,
-    categories: set[str],
-) -> dict:
-    filtered_items = [
-        item
-        for item in order.get(
-            "items",
-            [],
-        )
-        if item.get("category")
-        in categories
-    ]
-
-    serialized = serialize_order(
-        order,
-    )
-
-    serialized["items"] = (
-        filtered_items
-    )
-
-    serialized["total_items"] = sum(
-        int(
-            item.get(
-                "quantity",
-                0,
-            )
-        )
-        for item in filtered_items
-    )
-
-    return serialized
-
-
-async def update_overall_order_status_if_ready(
-    order_object_id: ObjectId,
+async def ensure_stock_available(
+    items: list[dict],
     business_id: ObjectId,
 ) -> None:
-    orders_collection = database[
-        "orders"
-    ]
+    for item in items:
+        product_id = item.get("product_id")
 
-    order = (
-        await orders_collection.find_one(
+        if not product_id or not ObjectId.is_valid(product_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Order contains an invalid product ID.",
+            )
+
+        product = await database["products"].find_one(
             {
-                "_id": order_object_id,
+                "_id": ObjectId(product_id),
                 "business_id": business_id,
             }
         )
-    )
 
-    if not order:
-        return
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product not found: {product_id}",
+            )
 
-    kitchen_status = order.get(
-        "kitchen_status",
-    )
+        available = int(product.get("stock", 0))
+        requested = int(item.get("quantity", 0))
 
-    bar_status = order.get(
-        "bar_status",
-    )
+        if requested <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Order contains an invalid quantity.",
+            )
 
-    has_kitchen = (
-        kitchen_status is not None
-    )
+        if available < requested:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Not enough stock for {product.get('name', 'product')}. "
+                    f"Available: {available}, requested: {requested}."
+                ),
+            )
 
-    has_bar = (
-        bar_status is not None
-    )
 
-    kitchen_ready = (
-        not has_kitchen
-        or kitchen_status == "ready"
-    )
-
-    bar_ready = (
-        not has_bar
-        or bar_status == "ready"
-    )
-
-    if (
-        (has_kitchen or has_bar)
-        and kitchen_ready
-        and bar_ready
-    ):
-        current_time = datetime.now(
-            timezone.utc,
-        )
-
-        await orders_collection.update_one(
+async def change_stock(
+    items: list[dict],
+    business_id: ObjectId,
+    multiplier: int,
+) -> None:
+    for item in items:
+        result = await database["products"].update_one(
             {
-                "_id": order_object_id,
+                "_id": ObjectId(item["product_id"]),
                 "business_id": business_id,
             },
             {
-                "$set": {
-                    "status": "ready",
-                    "ready_at": current_time,
-                    "updated_at": current_time,
+                "$inc": {
+                    "stock": multiplier * int(item["quantity"]),
                 }
             },
         )
 
+        if result.matched_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product not found: {item['product_id']}",
+            )
 
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_order(
-    order_data: OrderCreate,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
-):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
+
+async def deduct_stock_if_needed(
+    order: dict,
+    business_id: ObjectId,
+) -> dict:
+    if order.get("stock_deducted") and not order.get("stock_restored"):
+        return order
+
+    items = order.get("items", [])
+    await ensure_stock_available(items, business_id)
+    await change_stock(items, business_id, -1)
+
+    now = datetime.now(timezone.utc)
+
+    await database["orders"].update_one(
+        {
+            "_id": order["_id"],
+            "business_id": business_id,
+        },
+        {
+            "$set": {
+                "stock_deducted": True,
+                "stock_restored": False,
+                "stock_deducted_at": now,
+                "stock_restored_at": None,
+                "updated_at": now,
+            }
+        },
     )
 
-    if not ObjectId.is_valid(
-        order_data.table_id,
-    ):
+    return await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
+    )
+
+
+async def restore_stock_if_needed(
+    order: dict,
+    business_id: ObjectId,
+) -> None:
+    if not order.get("stock_deducted") or order.get("stock_restored"):
+        return
+
+    await change_stock(order.get("items", []), business_id, 1)
+
+    now = datetime.now(timezone.utc)
+    await database["orders"].update_one(
+        {
+            "_id": order["_id"],
+            "business_id": business_id,
+        },
+        {
+            "$set": {
+                "stock_restored": True,
+                "stock_restored_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+
+
+async def free_order_table(order: dict, business_id: ObjectId) -> None:
+    await database["tables"].update_one(
+        {
+            "_id": order["table_id"],
+            "business_id": business_id,
+            "active_order_id": order["_id"],
+        },
+        {
+            "$set": {"status": "free"},
+            "$unset": {"active_order_id": ""},
+        },
+    )
+
+
+async def update_overall_order_status(
+    order_object_id: ObjectId,
+    business_id: ObjectId,
+) -> None:
+    order = await database["orders"].find_one(
+        {
+            "_id": order_object_id,
+            "business_id": business_id,
+        }
+    )
+
+    if not order or order.get("status") in {"paid", "cancelled", "draft"}:
+        return
+
+    station_statuses = [
+        value
+        for value in (
+            order.get("kitchen_status"),
+            order.get("bar_status"),
+        )
+        if value is not None
+    ]
+
+    if not station_statuses:
+        return
+
+    now = datetime.now(timezone.utc)
+    update_fields = {"updated_at": now}
+
+    if all(value == "ready" for value in station_statuses):
+        update_fields["status"] = "ready"
+        update_fields["ready_at"] = now
+    elif any(value == "preparing" for value in station_statuses):
+        update_fields["status"] = "preparing"
+        update_fields["preparing_at"] = order.get("preparing_at") or now
+    else:
+        update_fields["status"] = "sent_to_kitchen"
+
+    await database["orders"].update_one(
+        {
+            "_id": order_object_id,
+            "business_id": business_id,
+        },
+        {"$set": update_fields},
+    )
+
+
+async def get_tenant_order(
+    order_id: str,
+    business_id: ObjectId,
+) -> dict:
+    if not ObjectId.is_valid(order_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid table ID.",
+            detail="Invalid order ID.",
         )
 
-    tables_collection = database[
-        "tables"
-    ]
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    table_object_id = ObjectId(
-        order_data.table_id,
+    order = await database["orders"].find_one(
+        {
+            "_id": ObjectId(order_id),
+            "business_id": business_id,
+        }
     )
 
-    table = (
-        await tables_collection.find_one(
-            {
-                "_id": table_object_id,
-                "business_id": business_id,
-            }
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found.",
         )
+
+    return order
+
+
+async def verify_tenant_admin_pin(
+    business_id: ObjectId,
+    pin: str,
+) -> dict:
+    cursor = database["users"].find(
+        {
+            "business_id": business_id,
+            "role": "admin",
+            "is_active": {"$ne": False},
+            "hashed_pin": {"$exists": True, "$ne": None},
+        }
+    )
+
+    async for admin in cursor:
+        if verify_password(pin, admin["hashed_pin"]):
+            return admin
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Administrator PIN is incorrect.",
+    )
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_order(
+    order_data: OrderCreate,
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    business_id = get_business_object_id(current_user)
+
+    table = await database["tables"].find_one(
+        {
+            "_id": ObjectId(order_data.table_id),
+            "business_id": business_id,
+            "is_active": {"$ne": False},
+        }
     )
 
     if not table:
@@ -522,74 +471,39 @@ async def create_order(
             detail="Table not found.",
         )
 
-    active_order_id = table.get(
-        "active_order_id",
-    )
+    active_order_id = table.get("active_order_id")
 
     if active_order_id:
-        existing_order = (
-            await orders_collection.find_one(
-                {
-                    "_id": active_order_id,
-                    "business_id": business_id,
-                    "status": {
-                        "$in": list(
-                            ACTIVE_ORDER_STATUSES,
-                        ),
-                    },
-                }
-            )
+        active_order = await database["orders"].find_one(
+            {
+                "_id": active_order_id,
+                "business_id": business_id,
+                "status": {"$in": list(ACTIVE_ORDER_STATUSES)},
+            }
         )
 
-        if existing_order:
+        if active_order:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This table already has an "
-                    "active order. Update the "
-                    "existing order."
-                ),
+                detail="This table already has an active order.",
             )
 
-        await tables_collection.update_one(
-            {
-                "_id": table_object_id,
-                "business_id": business_id,
-            },
-            {
-                "$unset": {
-                    "active_order_id": "",
-                }
-            },
-        )
-
-    (
-        prepared_items,
-        total_items,
-        order_total,
-    ) = await prepare_order_items(
+    prepared_items, total_items, order_total = await prepare_order_items(
         order_data.items,
         business_id,
     )
 
-    current_time = datetime.now(
-        timezone.utc,
-    )
+    now = datetime.now(timezone.utc)
 
-    new_order = {
+    order = {
+        "_id": ObjectId(),
         "business_id": business_id,
-        "table_id": table_object_id,
-        "table_number": table["number"],
-        "table_zone": table["zone"],
-        "opened_by_user_id": current_user[
-            "id"
-        ],
-        "opened_by_name": current_user[
-            "name"
-        ],
-        "opened_by_role": current_user[
-            "role"
-        ],
+        "table_id": table["_id"],
+        "table_number": table.get("number"),
+        "table_zone": table.get("zone"),
+        "opened_by_user_id": current_user["id"],
+        "opened_by_name": current_user["name"],
+        "opened_by_role": current_user["role"],
         "items": prepared_items,
         "total_items": total_items,
         "total": order_total,
@@ -597,10 +511,13 @@ async def create_order(
         "kitchen_status": None,
         "bar_status": None,
         "payment_method": None,
+        "paid_by_user_id": None,
+        "paid_by_name": None,
+        "paid_by_role": None,
         "stock_deducted": False,
         "stock_restored": False,
-        "created_at": current_time,
-        "updated_at": current_time,
+        "created_at": now,
+        "updated_at": now,
         "sent_to_kitchen_at": None,
         "preparing_at": None,
         "ready_at": None,
@@ -610,1813 +527,628 @@ async def create_order(
         "stock_restored_at": None,
     }
 
-    result = (
-        await orders_collection.insert_one(
-            new_order,
-        )
-    )
+    await database["orders"].insert_one(order)
 
-    await tables_collection.update_one(
+    result = await database["tables"].update_one(
         {
-            "_id": table_object_id,
+            "_id": table["_id"],
             "business_id": business_id,
+            "$or": [
+                {"active_order_id": {"$exists": False}},
+                {"active_order_id": None},
+            ],
         },
         {
             "$set": {
                 "status": "occupied",
-                "active_order_id": (
-                    result.inserted_id
-                ),
+                "active_order_id": order["_id"],
             }
         },
     )
 
-    created_order = (
-        await orders_collection.find_one(
-            {
-                "_id": result.inserted_id,
-                "business_id": business_id,
-            }
+    if result.modified_count == 0:
+        await database["orders"].delete_one(
+            {"_id": order["_id"], "business_id": business_id}
         )
-    )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Table is no longer available.",
+        )
 
-    return serialize_order(
-        created_order,
-    )
+    return serialize_order(order)
 
 
 @router.get("")
 async def get_orders(
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    orders = await database["orders"].find(
+        {"business_id": business_id}
+    ).sort("created_at", -1).to_list(length=None)
 
-    orders = []
-
-    cursor = (
-        database["orders"]
-        .find(
-            {
-                "business_id": business_id,
-            }
-        )
-        .sort(
-            "created_at",
-            -1,
-        )
-    )
-
-    async for order in cursor:
-        orders.append(
-            serialize_order(
-                order,
-            )
-        )
-
-    return orders
+    return [serialize_order(order) for order in orders]
 
 
-@router.get("/kitchen")
+@router.get(
+    "/kitchen",
+    dependencies=[Depends(require_standard_plan)],
+)
 async def get_kitchen_orders(
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
 
-    kitchen_orders = []
+    orders = await database["orders"].find(
+        {
+            "business_id": business_id,
+            "status": {"$nin": ["paid", "cancelled", "draft"]},
+            "kitchen_status": {"$in": ["pending", "preparing", "ready"]},
+        }
+    ).sort("created_at", 1).to_list(length=None)
 
-    cursor = (
-        database["orders"]
-        .find(
-            {
-                "business_id": business_id,
-                "status": {
-                    "$nin": [
-                        "paid",
-                        "cancelled",
-                    ]
-                },
-                "kitchen_status": {
-                    "$in": [
-                        "pending",
-                        "preparing",
-                        "ready",
-                    ]
-                },
-            }
-        )
-        .sort(
-            "created_at",
-            1,
-        )
-    )
-
-    async for order in cursor:
-        kitchen_items = [
-            item
-            for item in order.get(
-                "items",
-                [],
-            )
-            if item.get("category")
-            in KITCHEN_CATEGORIES
-        ]
-
-        if not kitchen_items:
-            continue
-
-        kitchen_orders.append(
-            filter_items_by_categories(
-                order,
-                KITCHEN_CATEGORIES,
-            )
-        )
-
-    return kitchen_orders
+    return [
+        filter_items_by_categories(order, KITCHEN_CATEGORIES)
+        for order in orders
+        if order_has_kitchen_items(order)
+    ]
 
 
-@router.get("/bar")
+@router.get(
+    "/bar",
+    dependencies=[Depends(require_standard_plan)],
+)
 async def get_bar_orders(
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
 
-    bar_orders = []
+    orders = await database["orders"].find(
+        {
+            "business_id": business_id,
+            "status": {"$nin": ["paid", "cancelled", "draft"]},
+            "bar_status": {"$in": ["pending", "preparing", "ready"]},
+        }
+    ).sort("created_at", 1).to_list(length=None)
 
-    cursor = (
-        database["orders"]
-        .find(
-            {
-                "business_id": business_id,
-                "status": {
-                    "$nin": [
-                        "paid",
-                        "cancelled",
-                    ]
-                },
-                "bar_status": {
-                    "$in": [
-                        "pending",
-                        "preparing",
-                        "ready",
-                    ]
-                },
-            }
-        )
-        .sort(
-            "created_at",
-            1,
-        )
-    )
-
-    async for order in cursor:
-        bar_items = [
-            item
-            for item in order.get(
-                "items",
-                [],
-            )
-            if item.get("category")
-            in BAR_CATEGORIES
-        ]
-
-        if not bar_items:
-            continue
-
-        bar_orders.append(
-            filter_items_by_categories(
-                order,
-                BAR_CATEGORIES,
-            )
-        )
-
-    return bar_orders
+    return [
+        filter_items_by_categories(order, BAR_CATEGORIES)
+        for order in orders
+        if order_has_bar_items(order)
+    ]
 
 
 @router.delete("/reset-demo")
 async def reset_demo_orders(
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
-
-    if (
-        current_user.get("role")
-        != "admin"
-    ):
+    if current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required.",
+            detail="Administrator access is required.",
         )
 
-    orders_collection = database[
-        "orders"
-    ]
+    business_id = get_business_object_id(current_user)
 
-    tables_collection = database[
-        "tables"
-    ]
-
-    delete_result = (
-        await orders_collection.delete_many(
-            {
-                "business_id": business_id,
-            }
-        )
+    delete_result = await database["orders"].delete_many(
+        {"business_id": business_id}
     )
 
-    table_update_result = (
-        await tables_collection.update_many(
-            {
-                "business_id": business_id,
-            },
-            {
-                "$set": {
-                    "status": "free",
-                },
-                "$unset": {
-                    "active_order_id": "",
-                },
-            },
-        )
+    table_result = await database["tables"].update_many(
+        {"business_id": business_id},
+        {
+            "$set": {"status": "free"},
+            "$unset": {"active_order_id": ""},
+        },
     )
 
     return {
-        "message": (
-            "Demo orders were reset "
-            "successfully."
-        ),
-        "deleted_orders": (
-            delete_result.deleted_count
-        ),
-        "updated_tables": (
-            table_update_result.modified_count
-        ),
+        "message": "Demo orders were reset for this business only.",
+        "deleted_orders": delete_result.deleted_count,
+        "updated_tables": table_result.modified_count,
     }
 
 
 @router.patch(
-    "/{order_id}/kitchen-status"
+    "/{order_id}/kitchen-status",
+    dependencies=[Depends(require_standard_plan)],
 )
 async def update_kitchen_status(
     order_id: str,
     status_data: StationStatusUpdate,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    if existing_order.get(
-        "status",
-    ) in {
-        "paid",
-        "cancelled",
-    }:
+    if order.get("status") in {"paid", "cancelled"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Closed orders cannot "
-                "be updated."
-            ),
+            detail="Closed orders cannot be updated.",
         )
 
-    if not order_has_kitchen_items(
-        existing_order,
-    ):
+    if not order_has_kitchen_items(order):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Order does not contain "
-                "kitchen items."
-            ),
+            detail="Order does not contain kitchen items.",
         )
 
-    current_time = datetime.now(
-        timezone.utc,
-    )
-
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
         {
             "$set": {
-                "kitchen_status": (
-                    status_data.status
-                ),
-                "updated_at": current_time,
+                "kitchen_status": status_data.status,
+                "updated_at": datetime.now(timezone.utc),
             }
         },
     )
 
-    await update_overall_order_status_if_ready(
-        order_object_id,
-        business_id,
-    )
+    await update_overall_order_status(order["_id"], business_id)
 
-    updated_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
-
-    return serialize_order(
-        updated_order,
-    )
+    return serialize_order(updated)
 
 
 @router.patch(
-    "/{order_id}/bar-status"
+    "/{order_id}/bar-status",
+    dependencies=[Depends(require_standard_plan)],
 )
 async def update_bar_status(
     order_id: str,
     status_data: StationStatusUpdate,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    if existing_order.get(
-        "status",
-    ) in {
-        "paid",
-        "cancelled",
-    }:
+    if order.get("status") in {"paid", "cancelled"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Closed orders cannot "
-                "be updated."
-            ),
+            detail="Closed orders cannot be updated.",
         )
 
-    if not order_has_bar_items(
-        existing_order,
-    ):
+    if not order_has_bar_items(order):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Order does not contain "
-                "bar items."
-            ),
+            detail="Order does not contain bar items.",
         )
 
-    current_time = datetime.now(
-        timezone.utc,
-    )
-
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
         {
             "$set": {
-                "bar_status": (
-                    status_data.status
-                ),
-                "updated_at": current_time,
+                "bar_status": status_data.status,
+                "updated_at": datetime.now(timezone.utc),
             }
         },
     )
 
-    await update_overall_order_status_if_ready(
-        order_object_id,
-        business_id,
+    await update_overall_order_status(order["_id"], business_id)
+
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
-
-    updated_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    return serialize_order(
-        updated_order,
-    )
+    return serialize_order(updated)
 
 
-@router.patch(
-    "/{order_id}/transfer-table"
-)
+@router.patch("/{order_id}/transfer-table")
 async def transfer_order_table(
     order_id: str,
     transfer_data: OrderTableTransfer,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    if not ObjectId.is_valid(
-        transfer_data.new_table_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid target table ID.",
-        )
-
-    new_table_object_id = ObjectId(
-        transfer_data.new_table_id,
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    tables_collection = database[
-        "tables"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    if (
-        existing_order.get("status")
-        not in ACTIVE_ORDER_STATUSES
-    ):
+    if order.get("status") not in ACTIVE_ORDER_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Only active orders can "
-                "be transferred."
-            ),
+            detail="Only active orders can be transferred.",
         )
 
-    old_table_id = existing_order.get(
-        "table_id",
-    )
+    new_table_id = ObjectId(transfer_data.new_table_id)
 
-    if (
-        old_table_id
-        == new_table_object_id
-    ):
+    if order["table_id"] == new_table_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "The order is already "
-                "assigned to this table."
-            ),
+            detail="The order is already assigned to this table.",
         )
 
-    new_table = (
-        await tables_collection.find_one(
-            {
-                "_id": new_table_object_id,
-                "business_id": business_id,
-            }
-        )
+    target = await database["tables"].find_one(
+        {
+            "_id": new_table_id,
+            "business_id": business_id,
+            "is_active": {"$ne": False},
+        }
     )
 
-    if not new_table:
+    if not target:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target table not found.",
         )
 
-    if (
-        new_table.get(
-            "is_active",
-            True,
-        )
-        is False
-    ):
+    if target.get("status") != "free" or target.get("active_order_id"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Target table is not active."
-            ),
+            detail="Target table is not free.",
         )
 
-    if (
-        new_table.get("status")
-        != "free"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Target table is not free."
-            ),
-        )
-
-    if new_table.get(
-        "active_order_id",
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Target table already has "
-                "an active order."
-            ),
-        )
-
-    current_time = datetime.now(
-        timezone.utc,
+    claim = await database["tables"].update_one(
+        {
+            "_id": new_table_id,
+            "business_id": business_id,
+            "status": "free",
+            "$or": [
+                {"active_order_id": {"$exists": False}},
+                {"active_order_id": None},
+            ],
+        },
+        {
+            "$set": {
+                "status": "occupied",
+                "active_order_id": order["_id"],
+            }
+        },
     )
 
-    target_result = (
-        await tables_collection.update_one(
-            {
-                "_id": new_table_object_id,
-                "business_id": business_id,
-                "status": "free",
-                "$or": [
-                    {
-                        "active_order_id": {
-                            "$exists": False,
-                        }
-                    },
-                    {
-                        "active_order_id": None,
-                    },
-                ],
-            },
-            {
-                "$set": {
-                    "status": "occupied",
-                    "active_order_id": (
-                        order_object_id
-                    ),
-                }
-            },
-        )
-    )
-
-    if (
-        target_result.modified_count
-        == 0
-    ):
+    if claim.modified_count == 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Target table is no longer "
-                "available."
-            ),
+            detail="Target table is no longer available.",
         )
+
+    old_table_id = order["table_id"]
+    now = datetime.now(timezone.utc)
 
     try:
-        await orders_collection.update_one(
-            {
-                "_id": order_object_id,
-                "business_id": business_id,
-            },
+        await database["orders"].update_one(
+            {"_id": order["_id"], "business_id": business_id},
             {
                 "$set": {
-                    "table_id": (
-                        new_table_object_id
-                    ),
-                    "table_number": (
-                        new_table["number"]
-                    ),
-                    "table_zone": (
-                        new_table["zone"]
-                    ),
-                    "updated_at": current_time,
+                    "table_id": target["_id"],
+                    "table_number": target.get("number"),
+                    "table_zone": target.get("zone"),
+                    "updated_at": now,
                 }
             },
         )
 
-        await tables_collection.update_one(
+        await database["tables"].update_one(
             {
                 "_id": old_table_id,
                 "business_id": business_id,
-                "active_order_id": (
-                    order_object_id
-                ),
+                "active_order_id": order["_id"],
             },
             {
-                "$set": {
-                    "status": "free",
-                },
-                "$unset": {
-                    "active_order_id": "",
-                },
+                "$set": {"status": "free"},
+                "$unset": {"active_order_id": ""},
             },
         )
-
     except Exception:
-        await tables_collection.update_one(
+        await database["tables"].update_one(
             {
-                "_id": new_table_object_id,
+                "_id": target["_id"],
                 "business_id": business_id,
-                "active_order_id": (
-                    order_object_id
-                ),
+                "active_order_id": order["_id"],
             },
             {
-                "$set": {
-                    "status": "free",
-                },
-                "$unset": {
-                    "active_order_id": "",
-                },
+                "$set": {"status": "free"},
+                "$unset": {"active_order_id": ""},
             },
         )
-
         raise
 
-    updated_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
-
-    return serialize_order(
-        updated_order,
-    )
+    return serialize_order(updated)
 
 
 @router.get("/{order_id}")
 async def get_order(
     order_id: str,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
-
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    return serialize_order(
-        order,
-    )
+    business_id = get_business_object_id(current_user)
+    return serialize_order(await get_tenant_order(order_id, business_id))
 
 
-@router.post(
-    "/{order_id}/add-items"
-)
+@router.post("/{order_id}/add-items")
 async def add_items_to_order(
     order_id: str,
     order_data: OrderAddItems,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    products_collection = database[
-        "products"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    if existing_order.get(
-        "status",
-    ) in {
-        "draft",
-        "paid",
-        "cancelled",
-    }:
+    if order.get("status") in {"draft", "paid", "cancelled"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Items can only be added "
-                "to an active sent order."
-            ),
+            detail="Items can only be added after the order has been sent.",
         )
 
-    (
-        prepared_items,
-        added_total_items,
-        added_total,
-    ) = await prepare_order_items(
+    prepared, added_count, added_total = await prepare_order_items(
         order_data.items,
         business_id,
     )
 
-    current_time = datetime.now(
-        timezone.utc,
-    )
+    await ensure_stock_available(prepared, business_id)
+    await change_stock(prepared, business_id, -1)
 
-    for item in prepared_items:
-        item["added_by_user_id"] = (
-            current_user["id"]
-        )
+    now = datetime.now(timezone.utc)
 
-        item["added_by_name"] = (
-            current_user["name"]
-        )
-
-        item["added_by_role"] = (
-            current_user["role"]
-        )
-
-        item["added_at"] = (
-            current_time
-        )
-
-    for item in prepared_items:
-        product_id = item[
-            "product_id"
-        ]
-
-        quantity = int(
-            item["quantity"],
-        )
-
-        product = (
-            await products_collection.find_one(
-                {
-                    "_id": ObjectId(
-                        product_id,
-                    ),
-                    "business_id": business_id,
-                }
-            )
-        )
-
-        if not product:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"Product not found: "
-                    f"{product_id}"
-                ),
-            )
-
-        current_stock = int(
-            product.get(
-                "stock",
-                0,
-            )
-        )
-
-        if (
-            current_stock
-            < quantity
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Not enough stock for "
-                    f"{product.get('name', 'product')}. "
-                    f"Available: {current_stock}."
-                ),
-            )
-
-    for item in prepared_items:
-        await products_collection.update_one(
-            {
-                "_id": ObjectId(
-                    item["product_id"],
-                ),
-                "business_id": business_id,
-            },
-            {
-                "$inc": {
-                    "stock": -int(
-                        item["quantity"],
-                    ),
-                }
-            },
-        )
-
-    existing_items = (
-        existing_order.get(
-            "items",
-            [],
-        )
-    )
-
-    updated_items = [
-        *existing_items,
-        *prepared_items,
-    ]
-
-    updated_total_items = (
-        int(
-            existing_order.get(
-                "total_items",
-                0,
-            )
-        )
-        + added_total_items
-    )
-
-    updated_total = round(
-        float(
-            existing_order.get(
-                "total",
-                0,
-            )
-        )
-        + added_total,
-        2,
-    )
+    for item in prepared:
+        item["added_by_user_id"] = current_user["id"]
+        item["added_by_name"] = current_user["name"]
+        item["added_by_role"] = current_user["role"]
+        item["added_at"] = now
 
     update_fields = {
-        "items": updated_items,
-        "total_items": (
-            updated_total_items
-        ),
-        "total": updated_total,
-        "updated_at": current_time,
+        "items": [*order.get("items", []), *prepared],
+        "total_items": int(order.get("total_items", 0)) + added_count,
+        "total": round(float(order.get("total", 0)) + added_total, 2),
+        "status": "sent_to_kitchen",
+        "ready_at": None,
         "stock_deducted": True,
+        "stock_restored": False,
+        "updated_at": now,
     }
 
-    added_kitchen_items = any(
-        item.get("category")
-        in KITCHEN_CATEGORIES
-        for item in prepared_items
+    if any(item.get("category") in KITCHEN_CATEGORIES for item in prepared):
+        update_fields["kitchen_status"] = "pending"
+
+    if any(item.get("category") in BAR_CATEGORIES for item in prepared):
+        update_fields["bar_status"] = "pending"
+
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
+        {"$set": update_fields},
     )
 
-    added_bar_items = any(
-        item.get("category")
-        in BAR_CATEGORIES
-        for item in prepared_items
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
-
-    if added_kitchen_items:
-        update_fields[
-            "kitchen_status"
-        ] = "pending"
-
-    if added_bar_items:
-        update_fields[
-            "bar_status"
-        ] = "pending"
-
-    if (
-        added_kitchen_items
-        or added_bar_items
-    ):
-        update_fields[
-            "status"
-        ] = "sent_to_kitchen"
-
-        update_fields[
-            "ready_at"
-        ] = None
-
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
-        {
-            "$set": update_fields,
-        },
-    )
-
-    updated_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    return serialize_order(
-        updated_order,
-    )
+    return serialize_order(updated)
 
 
 @router.put("/{order_id}")
 async def update_order(
     order_id: str,
     order_data: OrderUpdate,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    tables_collection = database[
-        "tables"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    if (
-        existing_order.get(
-            "status"
-        )
-        != "draft"
-    ):
+    if order.get("status") != "draft":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Only draft orders can "
-                "be updated."
-            ),
+            detail="Only draft orders can be updated.",
         )
 
-    (
-        prepared_items,
-        total_items,
-        order_total,
-    ) = await prepare_order_items(
+    prepared, total_items, total = await prepare_order_items(
         order_data.items,
         business_id,
     )
 
-    current_time = datetime.now(
-        timezone.utc,
-    )
-
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
         {
             "$set": {
-                "items": prepared_items,
+                "items": prepared,
                 "total_items": total_items,
-                "total": order_total,
-                "updated_at": current_time,
+                "total": total,
+                "updated_at": datetime.now(timezone.utc),
             }
         },
     )
 
-    await tables_collection.update_one(
-        {
-            "_id": existing_order[
-                "table_id"
-            ],
-            "business_id": business_id,
-        },
-        {
-            "$set": {
-                "status": "occupied",
-                "active_order_id": (
-                    order_object_id
-                ),
-            }
-        },
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
-
-    updated_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    return serialize_order(
-        updated_order,
-    )
+    return serialize_order(updated)
 
 
 @router.patch("/{order_id}/status")
 async def update_order_status(
     order_id: str,
     status_data: OrderStatusUpdate,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    products_collection = database[
-        "products"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
+    if status_data.status != "sent_to_kitchen":
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the dedicated endpoints for payment, cancel, kitchen and bar status.",
         )
 
-    current_status = (
-        existing_order.get(
-            "status",
-            "draft",
-        )
-    )
-
-    new_status = (
-        status_data.status
-    )
-
-    if (
-        current_status
-        == new_status
-    ):
+    if order.get("status") != "draft":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Order already has status "
-                f"'{new_status}'."
-            ),
+            detail="Only draft orders can be sent.",
         )
 
-    allowed_statuses = (
-        ORDER_STATUS_TRANSITIONS.get(
-            current_status,
-            set(),
-        )
-    )
-
-    if (
-        new_status
-        not in allowed_statuses
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Status cannot change from "
-                f"'{current_status}' "
-                f"to '{new_status}'."
-            ),
-        )
-
-    current_time = datetime.now(
-        timezone.utc,
-    )
+    order = await deduct_stock_if_needed(order, business_id)
+    now = datetime.now(timezone.utc)
 
     update_fields = {
-        "status": new_status,
-        "updated_at": current_time,
+        "status": "sent_to_kitchen",
+        "sent_to_kitchen_at": now,
+        "updated_at": now,
+        "kitchen_status": "pending" if order_has_kitchen_items(order) else None,
+        "bar_status": "pending" if order_has_bar_items(order) else None,
     }
 
-    status_timestamp_fields = {
-        "sent_to_kitchen": (
-            "sent_to_kitchen_at"
-        ),
-        "preparing": "preparing_at",
-        "ready": "ready_at",
-    }
-
-    timestamp_field = (
-        status_timestamp_fields.get(
-            new_status,
-        )
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
+        {"$set": update_fields},
     )
 
-    if timestamp_field:
-        update_fields[
-            timestamp_field
-        ] = current_time
-
-    if (
-        current_status == "draft"
-        and new_status
-        == "sent_to_kitchen"
-    ):
-        items = existing_order.get(
-            "items",
-            [],
-        )
-
-        for item in items:
-            product_id = item.get(
-                "product_id",
-            )
-
-            quantity = int(
-                item.get(
-                    "quantity",
-                    0,
-                )
-            )
-
-            if (
-                not product_id
-                or not ObjectId.is_valid(
-                    product_id,
-                )
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Order contains an "
-                        "invalid product ID."
-                    ),
-                )
-
-            if quantity <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Order contains an "
-                        "invalid quantity."
-                    ),
-                )
-
-            product = (
-                await products_collection.find_one(
-                    {
-                        "_id": ObjectId(
-                            product_id,
-                        ),
-                        "business_id": (
-                            business_id
-                        ),
-                    }
-                )
-            )
-
-            if not product:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=(
-                        f"Product not found: "
-                        f"{product_id}"
-                    ),
-                )
-
-            current_stock = int(
-                product.get(
-                    "stock",
-                    0,
-                )
-            )
-
-            if (
-                current_stock
-                < quantity
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f"Not enough stock for "
-                        f"{product.get('name', 'product')}. "
-                        f"Available: {current_stock}, "
-                        f"requested: {quantity}."
-                    ),
-                )
-
-        for item in items:
-            await products_collection.update_one(
-                {
-                    "_id": ObjectId(
-                        item[
-                            "product_id"
-                        ],
-                    ),
-                    "business_id": business_id,
-                },
-                {
-                    "$inc": {
-                        "stock": -int(
-                            item[
-                                "quantity"
-                            ],
-                        ),
-                    }
-                },
-            )
-
-        update_fields[
-            "stock_deducted"
-        ] = True
-
-        update_fields[
-            "stock_restored"
-        ] = False
-
-        update_fields[
-            "stock_deducted_at"
-        ] = current_time
-
-        if order_has_kitchen_items(
-            existing_order,
-        ):
-            update_fields[
-                "kitchen_status"
-            ] = "pending"
-        else:
-            update_fields[
-                "kitchen_status"
-            ] = None
-
-        if order_has_bar_items(
-            existing_order,
-        ):
-            update_fields[
-                "bar_status"
-            ] = "pending"
-        else:
-            update_fields[
-                "bar_status"
-            ] = None
-
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
-        {
-            "$set": update_fields,
-        },
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
-
-    updated_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    return serialize_order(
-        updated_order,
-    )
+    return serialize_order(updated)
 
 
 @router.patch("/{order_id}/pay")
 async def pay_order(
     order_id: str,
     payment_data: OrderPayment,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    tables_collection = database[
-        "tables"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    current_status = (
-        existing_order.get(
-            "status",
-            "draft",
-        )
-    )
-
-    if (
-        current_status
-        == "paid"
-    ):
+    if order.get("status") not in PAYABLE_ORDER_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Order is already paid.",
+            detail="This order cannot be paid in its current status.",
         )
 
-    if (
-        current_status
-        == "cancelled"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Cancelled orders cannot "
-                "be paid."
-            ),
-        )
-
-    if (
-        current_status
-        not in PAYABLE_ORDER_STATUSES
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This order cannot be paid "
-                "in its current status."
-            ),
-        )
-
-    if (
-        existing_order.get(
-            "total",
-            0,
-        )
-        <= 0
-    ):
+    if float(order.get("total", 0)) <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Order total must be "
-                "greater than zero."
-            ),
+            detail="Order total must be greater than zero.",
         )
 
-    current_time = datetime.now(
-        timezone.utc,
-    )
+    order = await deduct_stock_if_needed(order, business_id)
+    now = datetime.now(timezone.utc)
 
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
         {
             "$set": {
                 "status": "paid",
-                "payment_method": (
-                    payment_data.payment_method
-                ),
-                "paid_by_user_id": (
-                    current_user["id"]
-                ),
-                "paid_by_name": (
-                    current_user["name"]
-                ),
-                "paid_by_role": (
-                    current_user["role"]
-                ),
-                "paid_at": current_time,
-                "updated_at": current_time,
+                "payment_method": payment_data.payment_method,
+                "paid_by_user_id": current_user["id"],
+                "paid_by_name": current_user["name"],
+                "paid_by_role": current_user["role"],
+                "paid_at": now,
+                "updated_at": now,
             }
         },
     )
 
-    await tables_collection.update_one(
-        {
-            "_id": existing_order[
-                "table_id"
-            ],
-            "business_id": business_id,
-            "active_order_id": (
-                order_object_id
-            ),
-        },
+    await free_order_table(order, business_id)
+
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
+    )
+    return serialize_order(updated)
+
+
+@router.patch(
+    "/{order_id}/complimentary",
+    dependencies=[Depends(require_pro_plan)],
+)
+async def release_order_complimentary(
+    order_id: str,
+    release_data: OrderComplimentaryRelease,
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
+
+    if order.get("status") not in PAYABLE_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order cannot be released in its current status.",
+        )
+
+    admin = await verify_tenant_admin_pin(
+        business_id,
+        release_data.admin_pin,
+    )
+
+    order = await deduct_stock_if_needed(order, business_id)
+
+    original_total = round(float(order.get("total", 0)), 2)
+    now = datetime.now(timezone.utc)
+
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
         {
             "$set": {
-                "status": "free",
-            },
-            "$unset": {
-                "active_order_id": "",
-            },
+                "status": "paid",
+                "payment_method": "complimentary",
+                "complimentary_original_total": original_total,
+                "complimentary_reason": release_data.reason.strip(),
+                "complimentary_authorized_by_user_id": str(admin["_id"]),
+                "complimentary_authorized_by_name": admin.get("name"),
+                "paid_by_user_id": current_user["id"],
+                "paid_by_name": current_user["name"],
+                "paid_by_role": current_user["role"],
+                "paid_at": now,
+                "updated_at": now,
+            }
         },
     )
 
-    paid_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
+    await database["audit_logs"].insert_one(
+        {
+            "business_id": business_id,
+            "type": "complimentary_order",
+            "order_id": order["_id"],
+            "table_id": order["table_id"],
+            "table_number": order.get("table_number"),
+            "original_total": original_total,
+            "reason": release_data.reason.strip(),
+            "requested_by_user_id": current_user["id"],
+            "requested_by_name": current_user["name"],
+            "authorized_by_user_id": str(admin["_id"]),
+            "authorized_by_name": admin.get("name"),
+            "created_at": now,
+        }
     )
 
-    return serialize_order(
-        paid_order,
+    await free_order_table(order, business_id)
+
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
+    return serialize_order(updated)
 
 
 @router.patch("/{order_id}/cancel")
 async def cancel_order(
     order_id: str,
-    current_user: Annotated[
-        dict,
-        Depends(get_current_user),
-    ],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    business_id = (
-        get_business_object_id(
-            current_user,
-        )
-    )
+    business_id = get_business_object_id(current_user)
+    order = await get_tenant_order(order_id, business_id)
 
-    order_object_id = (
-        get_order_object_id(
-            order_id,
-        )
-    )
-
-    orders_collection = database[
-        "orders"
-    ]
-
-    tables_collection = database[
-        "tables"
-    ]
-
-    products_collection = database[
-        "products"
-    ]
-
-    existing_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
-        )
-
-    current_status = (
-        existing_order.get(
-            "status",
-            "draft",
-        )
-    )
-
-    if (
-        current_status
-        == "cancelled"
-    ):
+    if order.get("status") not in CANCELLABLE_ORDER_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Order is already cancelled."
-            ),
+            detail="Only draft or sent orders can be cancelled.",
         )
 
-    if (
-        current_status
-        == "paid"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Paid orders cannot be "
-                "cancelled."
-            ),
-        )
+    await restore_stock_if_needed(order, business_id)
+    now = datetime.now(timezone.utc)
 
-    if (
-        current_status
-        not in CANCELLABLE_ORDER_STATUSES
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Only draft or sent-to-kitchen "
-                "orders can be cancelled."
-            ),
-        )
-
-    current_time = datetime.now(
-        timezone.utc,
-    )
-
-    stock_was_deducted = (
-        existing_order.get(
-            "stock_deducted",
-            False,
-        )
-    )
-
-    stock_already_restored = (
-        existing_order.get(
-            "stock_restored",
-            False,
-        )
-    )
-
-    should_restore_stock = (
-        stock_was_deducted
-        and not stock_already_restored
-    )
-
-    if should_restore_stock:
-        for item in existing_order.get(
-            "items",
-            [],
-        ):
-            product_id = item.get(
-                "product_id",
-            )
-
-            quantity = int(
-                item.get(
-                    "quantity",
-                    0,
-                )
-            )
-
-            if (
-                not product_id
-                or not ObjectId.is_valid(
-                    product_id,
-                )
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Order contains an "
-                        "invalid product ID."
-                    ),
-                )
-
-            if quantity <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Order contains an "
-                        "invalid quantity."
-                    ),
-                )
-
-            product = (
-                await products_collection.find_one(
-                    {
-                        "_id": ObjectId(
-                            product_id,
-                        ),
-                        "business_id": (
-                            business_id
-                        ),
-                    }
-                )
-            )
-
-            if not product:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=(
-                        f"Product not found: "
-                        f"{product_id}"
-                    ),
-                )
-
-            await products_collection.update_one(
-                {
-                    "_id": ObjectId(
-                        product_id,
-                    ),
-                    "business_id": business_id,
-                },
-                {
-                    "$inc": {
-                        "stock": quantity,
-                    }
-                },
-            )
-
-    update_fields = {
-        "status": "cancelled",
-        "payment_method": None,
-        "cancelled_at": current_time,
-        "updated_at": current_time,
-        "kitchen_status": None,
-        "bar_status": None,
-    }
-
-    if should_restore_stock:
-        update_fields[
-            "stock_restored"
-        ] = True
-
-        update_fields[
-            "stock_restored_at"
-        ] = current_time
-
-    await orders_collection.update_one(
-        {
-            "_id": order_object_id,
-            "business_id": business_id,
-        },
-        {
-            "$set": update_fields,
-        },
-    )
-
-    await tables_collection.update_one(
-        {
-            "_id": existing_order[
-                "table_id"
-            ],
-            "business_id": business_id,
-            "active_order_id": (
-                order_object_id
-            ),
-        },
+    await database["orders"].update_one(
+        {"_id": order["_id"], "business_id": business_id},
         {
             "$set": {
-                "status": "free",
-            },
-            "$unset": {
-                "active_order_id": "",
-            },
+                "status": "cancelled",
+                "payment_method": None,
+                "cancelled_at": now,
+                "updated_at": now,
+                "kitchen_status": None,
+                "bar_status": None,
+            }
         },
     )
 
-    cancelled_order = (
-        await get_order_document(
-            order_object_id,
-            business_id,
-        )
-    )
+    await free_order_table(order, business_id)
 
-    return serialize_order(
-        cancelled_order,
+    updated = await database["orders"].find_one(
+        {"_id": order["_id"], "business_id": business_id}
     )
+    return serialize_order(updated)

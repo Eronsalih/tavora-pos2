@@ -12,11 +12,16 @@ import {
 } from "lucide-react";
 
 import { useTranslation } from "react-i18next";
-import { NavLink, useNavigate } from "react-router-dom";
+import {
+  NavLink,
+  useNavigate,
+} from "react-router-dom";
 
 import { useAuth } from "../../context/AuthContext";
+import { hasMinimumPlan } from "../../utils/subscriptionPlans";
 
 import "./Sidebar.css";
+
 
 const navigationItems = [
   {
@@ -24,42 +29,49 @@ const navigationItems = [
     path: "/",
     icon: LayoutDashboard,
     roles: ["admin", "cashier", "waiter"],
+    minimumPlan: "starter",
   },
   {
     translationKey: "nav.tables",
     path: "/tables",
     icon: TableProperties,
     roles: ["admin", "cashier", "waiter"],
+    minimumPlan: "starter",
   },
   {
     translationKey: "nav.orders",
     path: "/orders",
     icon: ReceiptText,
     roles: ["admin", "cashier", "waiter"],
+    minimumPlan: "starter",
   },
   {
     translationKey: "nav.kitchen",
     path: "/kitchen",
     icon: ChefHat,
     roles: ["admin", "cashier"],
+    minimumPlan: "standard",
   },
   {
     translationKey: "nav.bar",
     path: "/bar",
     icon: GlassWater,
     roles: ["admin", "cashier", "waiter"],
+    minimumPlan: "standard",
   },
   {
     translationKey: "nav.products",
     path: "/products",
     icon: Package,
     roles: ["admin"],
+    minimumPlan: "starter",
   },
   {
     translationKey: "nav.reports",
     path: "/reports",
     icon: BarChart3,
     roles: ["admin", "cashier"],
+    minimumPlan: "starter",
   },
   {
     translationKey: "nav.paymentPlan",
@@ -73,22 +85,45 @@ const navigationItems = [
     path: "/settings",
     icon: Settings,
     roles: ["admin"],
+    minimumPlan: "starter",
   },
 ];
 
+
 function Sidebar() {
   const { t } = useTranslation();
-
   const navigate = useNavigate();
 
-  const { user, logout } = useAuth();
+  const {
+    user,
+    subscription,
+    logout,
+  } = useAuth();
 
-  const visibleNavigationItems = navigationItems.filter((item) =>
-    item.roles.includes(user?.role),
-  );
+  const currentPlan =
+    subscription?.plan || "none";
+
+  const visibleNavigationItems =
+    navigationItems.filter((item) => {
+      if (!item.roles.includes(user?.role)) {
+        return false;
+      }
+
+      if (!item.minimumPlan) {
+        return true;
+      }
+
+      return hasMinimumPlan(
+        currentPlan,
+        item.minimumPlan,
+      );
+    });
+
 
   function handleLogout() {
-    const confirmed = window.confirm(t("nav.logoutConfirm"));
+    const confirmed = window.confirm(
+      t("nav.logoutConfirm"),
+    );
 
     if (!confirmed) {
       return;
@@ -101,14 +136,19 @@ function Sidebar() {
     });
   }
 
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="sidebar-brand-logo">T</div>
+        <div className="sidebar-brand-logo">
+          T
+        </div>
 
         <div className="sidebar-brand-content">
           <strong>Tavora POS</strong>
-          <span>{t("nav.managementSystem")}</span>
+          <span>
+            {t("nav.managementSystem")}
+          </span>
         </div>
       </div>
 
@@ -131,7 +171,8 @@ function Sidebar() {
 
               <span>
                 {t(item.translationKey, {
-                  defaultValue: item.defaultLabel,
+                  defaultValue:
+                    item.defaultLabel,
                 })}
               </span>
             </NavLink>
@@ -142,12 +183,22 @@ function Sidebar() {
       <div className="sidebar-footer">
         <div className="sidebar-user">
           <div className="sidebar-user-avatar">
-            {user?.name?.charAt(0)?.toUpperCase() || "U"}
+            {user?.name
+              ?.charAt(0)
+              ?.toUpperCase() || "U"}
           </div>
 
           <div className="sidebar-user-info">
-            <strong>{user?.name || "Tavora User"}</strong>
-            <span>{user?.role || "user"}</span>
+            <strong>
+              {user?.name || "Tavora User"}
+            </strong>
+
+            <span>
+              {user?.role || "user"}
+              {subscription?.plan
+                ? ` ? ${subscription.plan}`
+                : ""}
+            </span>
           </div>
         </div>
 
@@ -163,5 +214,6 @@ function Sidebar() {
     </aside>
   );
 }
+
 
 export default Sidebar;

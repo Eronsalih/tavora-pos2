@@ -149,7 +149,12 @@ function Orders() {
 
         if (order.status === "paid") {
           result.paidOrders += 1;
-          result.paidRevenue += Number(order.total || 0);
+          if (
+            order.payment_method === "cash" ||
+            order.payment_method === "card"
+          ) {
+            result.paidRevenue += Number(order.total || 0);
+          }
         }
 
         if (order.status === "cancelled") {

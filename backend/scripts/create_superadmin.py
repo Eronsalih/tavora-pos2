@@ -10,18 +10,9 @@ from app.services.auth_service import (
 async def main() -> None:
     print("=== Tavora Superadmin Setup ===")
 
-    name = input(
-        "Name: "
-    ).strip()
-
-    email = input(
-        "Email: "
-    ).strip().lower()
-
-    password = getpass(
-        "Password: "
-    )
-
+    name = input("Name: ").strip()
+    email = input("Email: ").strip().lower()
+    password = getpass("Password: ")
     confirm_password = getpass(
         "Confirm password: "
     )
@@ -49,31 +40,17 @@ async def main() -> None:
             email=email,
             password=password,
         )
-
     except ValueError as error:
         raise SystemExit(
             str(error)
         ) from error
 
     print()
-    print(
-        "Superadmin created successfully."
-    )
-
-    print(
-        f"ID: {user['id']}"
-    )
-
-    print(
-        f"Email: {user['email']}"
-    )
-
-    print(
-        f"Role: {user['role']}"
-    )
+    print("Superadmin created successfully.")
+    print(f"ID: {user['id']}")
+    print(f"Email: {user['email']}")
+    print(f"Role: {user['role']}")
 
 
 if __name__ == "__main__":
-    asyncio.run(
-        main()
-    )
+    asyncio.run(main())

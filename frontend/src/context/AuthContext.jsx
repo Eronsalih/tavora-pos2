@@ -16,93 +16,77 @@ import {
   saveAuthentication,
 } from "../services/authService";
 
+
 const AuthContext = createContext(null);
 
-function isPlatformSuperadmin(user) {
-  return user?.role === "superadmin";
-}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getStoredUser());
-
   const [loading, setLoading] = useState(true);
 
   const [subscription, setSubscription] = useState(null);
-
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
-
   const [subscriptionError, setSubscriptionError] = useState("");
 
-  // =====================================================
-  // REFRESH SUBSCRIPTION
-  // =====================================================
 
-  const refreshSubscription = useCallback(async (userOverride = null) => {
-    const token = getStoredToken();
+  const refreshSubscription = useCallback(
+    async (userOverride = null) => {
+      const activeUser = userOverride || getStoredUser();
+      const token = getStoredToken();
 
-    const currentUser = userOverride || getStoredUser();
-
-    if (!token) {
-      setSubscription(null);
-      setSubscriptionError("");
-      setSubscriptionLoading(false);
-
-      return null;
-    }
-
-    /*
-     * Superadmin is the Tavora platform owner.
-     * It is not attached to a restaurant/business
-     * and therefore has no tenant subscription.
-     */
-    if (isPlatformSuperadmin(currentUser)) {
-      setSubscription(null);
-      setSubscriptionError("");
-      setSubscriptionLoading(false);
-
-      return null;
-    }
-
-    setSubscriptionLoading(true);
-    setSubscriptionError("");
-
-    try {
-      const currentSubscription = await getSubscription();
-
-      setSubscription(currentSubscription);
-
-      return currentSubscription;
-    } catch (error) {
-      console.error("Subscription validation failed:", error);
-
-      if (error.response?.status === 401) {
-        clearAuthentication();
-
-        setUser(null);
+      if (!token || !activeUser) {
         setSubscription(null);
-
+        setSubscriptionError("");
+        setSubscriptionLoading(false);
         return null;
       }
 
-      setSubscription(null);
+      if (activeUser.role === "superadmin") {
+        const platformSubscription = {
+          status: "active",
+          plan: "platform-owner",
+          expires_at: null,
+        };
 
-      const detail = error.response?.data?.detail;
+        setSubscription(platformSubscription);
+        setSubscriptionError("");
+        setSubscriptionLoading(false);
+        return platformSubscription;
+      }
 
-      setSubscriptionError(
-        typeof detail === "string"
-          ? detail
-          : "Subscription could not be verified.",
-      );
+      setSubscriptionLoading(true);
+      setSubscriptionError("");
 
-      return null;
-    } finally {
-      setSubscriptionLoading(false);
-    }
-  }, []);
+      try {
+        const currentSubscription = await getSubscription();
+        setSubscription(currentSubscription);
+        return currentSubscription;
+      } catch (error) {
+        if (error.response?.status === 401) {
+          clearAuthentication();
+          setUser(null);
+          setSubscription(null);
+          return null;
+        }
 
-  // =====================================================
-  // VALIDATE AUTHENTICATION
-  // =====================================================
+        setSubscription(null);
+
+        const detail = error.response?.data?.detail;
+
+        setSubscriptionError(
+          typeof detail === "string"
+            ? detail
+            : "Subscription could not be verified.",
+        );
+
+        return null;
+      } finally {
+        setSubscriptionLoading(false);
+      }
+    },
+    [],
+  );
+
 
   const validateAuthentication = useCallback(async () => {
     const token = getStoredToken();
@@ -110,10 +94,8 @@ export function AuthProvider({ children }) {
     if (!token) {
       setUser(null);
       setSubscription(null);
-
       setLoading(false);
       setSubscriptionLoading(false);
-
       return;
     }
 
@@ -122,19 +104,26 @@ export function AuthProvider({ children }) {
     try {
       const currentUser = await getCurrentUser();
 
-      localStorage.setItem("tavora_user", JSON.stringify(currentUser));
+      localStorage.setItem(
+        "tavora_user",
+        JSON.stringify(currentUser),
+      );
+
+      if (currentUser.business_id) {
+        localStorage.setItem(
+          "tavora_business_id",
+          currentUser.business_id,
+        );
+      }
 
       setUser(currentUser);
-
       await refreshSubscription(currentUser);
     } catch (error) {
       console.error("Authentication validation failed:", error);
 
       clearAuthentication();
-
       setUser(null);
       setSubscription(null);
-
       setSubscriptionError("");
       setSubscriptionLoading(false);
     } finally {
@@ -142,67 +131,38 @@ export function AuthProvider({ children }) {
     }
   }, [refreshSubscription]);
 
+
   useEffect(() => {
     validateAuthentication();
   }, [validateAuthentication]);
 
-  // =====================================================
-  // LOGIN
-  // =====================================================
 
   const login = useCallback(
     async (authenticationData) => {
       saveAuthentication(authenticationData);
-
-      const authenticatedUser = authenticationData.user;
-
-      setUser(authenticatedUser);
-
+      setUser(authenticationData.user);
       setSubscription(null);
       setSubscriptionError("");
-
-      /*
-       * Tavora owner does not have a restaurant
-       * subscription.
-       */
-      if (isPlatformSuperadmin(authenticatedUser)) {
-        setSubscriptionLoading(false);
-
-        return null;
-      }
-
       setSubscriptionLoading(true);
 
-      return refreshSubscription(authenticatedUser);
+      return refreshSubscription(authenticationData.user);
     },
     [refreshSubscription],
   );
 
-  // =====================================================
-  // LOGOUT
-  // =====================================================
 
   const logout = useCallback(() => {
+    // Business ID remains on the device so employee PIN login still works.
     clearAuthentication();
-
     setUser(null);
     setSubscription(null);
-
     setSubscriptionError("");
     setSubscriptionLoading(false);
   }, []);
 
-  // =====================================================
-  // SUBSCRIPTION STATUS
-  // =====================================================
 
   const isSubscriptionActive = useMemo(() => {
-    /*
-     * Superadmin is not a tenant.
-     * Subscription rules belong only
-     * to restaurant/business accounts.
-     */
-    if (isPlatformSuperadmin(user)) {
+    if (user?.role === "superadmin") {
       return true;
     }
 
@@ -214,67 +174,60 @@ export function AuthProvider({ children }) {
       return true;
     }
 
-    const expirationTime = new Date(subscription.expires_at).getTime();
+    const expirationTime = new Date(
+      subscription.expires_at,
+    ).getTime();
 
-    if (Number.isNaN(expirationTime)) {
-      return false;
-    }
+    return (
+      !Number.isNaN(expirationTime) &&
+      expirationTime > Date.now()
+    );
+  }, [subscription, user]);
 
-    return expirationTime > Date.now();
-  }, [user, subscription]);
-
-  // =====================================================
-  // CONTEXT VALUE
-  // =====================================================
 
   const value = useMemo(
     () => ({
       user,
       loading,
-
       subscription,
       subscriptionLoading,
       subscriptionError,
-
       isAuthenticated: Boolean(user),
-
       isSubscriptionActive,
-
-      isSuperadmin: isPlatformSuperadmin(user),
-
       login,
       logout,
-
       refreshUser: validateAuthentication,
-
       refreshSubscription,
     }),
     [
       user,
       loading,
-
       subscription,
       subscriptionLoading,
       subscriptionError,
-
       isSubscriptionActive,
-
       login,
       logout,
-
       validateAuthentication,
       refreshSubscription,
     ],
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
+
 
 export function useAuth() {
   const context = useContext(AuthContext);
 
   if (!context) {
-    throw new Error("useAuth must be used inside AuthProvider.");
+    throw new Error(
+      "useAuth must be used inside AuthProvider.",
+    );
   }
 
   return context;

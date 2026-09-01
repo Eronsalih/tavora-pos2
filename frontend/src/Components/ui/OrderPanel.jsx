@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+import { useAuth } from "../../context/AuthContext";
+import { hasMinimumPlan } from "../../utils/subscriptionPlans";
+
 import {
   Armchair,
   Banknote,
@@ -14,8 +18,6 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { getTables } from "../../services/tableService";
-import "./OrderPanel.css";
 
 import { PRODUCT_CATEGORIES } from "../../constants/productCategories";
 
@@ -27,21 +29,26 @@ import {
   createOrder,
   getOrderById,
   payOrder,
-  transferOrderTable,
+  releaseOrderComplimentary,
   updateOrder,
   updateOrderStatus,
 } from "../../services/orderService";
 
+import "./OrderPanel.css";
+import "./ComplimentaryModal.css";
+
 function OrderPanel({ table, onClose, onOrderSaved }) {
   const { t } = useTranslation();
+
+  const { subscription } = useAuth();
+
+  const canUseComplimentary = hasMinimumPlan(
+    subscription?.plan || "none",
+    "pro",
+  );
   const [products, setProducts] = useState([]);
   const [orderItems, setOrderItems] = useState([]);
   const [newOrderItems, setNewOrderItems] = useState([]);
-
-  const [tables, setTables] = useState([]);
-  const [showTableTransfer, setShowTableTransfer] = useState(false);
-  const [selectedTransferTableId, setSelectedTransferTableId] = useState("");
-  const [transferringTable, setTransferringTable] = useState(false);
 
   const [currentOrderId, setCurrentOrderId] = useState(null);
   const [currentOrderStatus, setCurrentOrderStatus] = useState("draft");
@@ -59,6 +66,10 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
   const [savingOrder, setSavingOrder] = useState(false);
   const [payingOrder, setPayingOrder] = useState(false);
   const [cancellingOrder, setCancellingOrder] = useState(false);
+  const [complimentaryOpen, setComplimentaryOpen] = useState(false);
+  const [complimentaryPin, setComplimentaryPin] = useState("");
+  const [complimentaryReason, setComplimentaryReason] = useState("");
+  const [releasingComplimentary, setReleasingComplimentary] = useState(false);
 
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -67,6 +78,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
     if (!table) {
       return;
     }
+
     async function loadPanelData() {
       try {
         setLoadingProducts(true);
@@ -75,18 +87,12 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
         setSuccessMessage("");
 
         const productsData = await getProducts();
-        const tablesData = await getTables();
 
         const productsList = Array.isArray(productsData)
           ? productsData
           : productsData?.products || [];
 
-        const tablesList = Array.isArray(tablesData)
-          ? tablesData
-          : tablesData?.tables || [];
-
         setProducts(productsList);
-        setTables(tablesList);
 
         if (table.active_order_id) {
           const existingOrder = await getOrderById(table.active_order_id);
@@ -118,7 +124,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
       } catch (err) {
         console.error("Gabim gjatë hapjes së panelit:", err);
 
-        setError(err.message || t("orderPanel.loadError"));
+        setError(err.message || "Të dhënat nuk mund të ngarkohen.");
       } finally {
         setLoadingProducts(false);
         setLoadingOrder(false);
@@ -156,25 +162,6 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
       return matchesSearch && matchesCategory && isActive;
     });
   }, [products, searchTerm, activeCategory]);
-
-  const freeTables = useMemo(() => {
-    if (!table) {
-      return [];
-    }
-
-    const currentTableId = getTableId(table);
-
-    return tables.filter((item) => {
-      const itemId = getTableId(item);
-
-      return (
-        itemId &&
-        item.status === "free" &&
-        item.is_active !== false &&
-        itemId !== currentTableId
-      );
-    });
-  }, [tables, table]);
 
   const totalItems = useMemo(() => {
     const oldItems = orderItems.reduce(
@@ -215,7 +202,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
     payingOrder ||
     cancellingOrder ||
     sendingToKitchen ||
-    transferringTable;
+    releasingComplimentary;
 
   const orderIsEditable = !currentOrderId || currentOrderStatus === "draft";
 
@@ -224,54 +211,14 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
   }
 
   function getTableId(selectedTable) {
-    return selectedTable?.id || selectedTable?._id || null;
+    return selectedTable.id || selectedTable._id;
   }
 
   function resetMessages() {
     setError("");
     setSuccessMessage("");
   }
-  async function handleTransferTable() {
-    if (!currentOrderId) {
-      setError(t("orderPanel.noActiveOrderToTransfer"));
-      return;
-    }
 
-    if (!selectedTransferTableId) {
-      setError(t("orderPanel.selectTableToTransfer"));
-      return;
-    }
-
-    try {
-      setTransferringTable(true);
-      setError("");
-      setSuccessMessage("");
-
-      const updatedOrder = await transferOrderTable(
-        currentOrderId,
-        selectedTransferTableId,
-      );
-
-      setSuccessMessage(
-        t("orderPanel.transferSuccess", {
-          table: updatedOrder.table_number,
-        }),
-      );
-
-      setShowTableTransfer(false);
-      setSelectedTransferTableId("");
-
-      if (onOrderSaved) {
-        await onOrderSaved(updatedOrder);
-      }
-    } catch (err) {
-      console.error("Transfer table error:", err);
-
-      setError(err.message || t("orderPanel.transferError"));
-    } finally {
-      setTransferringTable(false);
-    }
-  }
   async function reloadProducts() {
     const productsData = await getProducts();
 
@@ -289,16 +236,12 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
     const stock = Number(product.stock || 0);
 
     if (!productId) {
-      setError(t("orderPanel.invalidProductId"));
+      setError("Produkti nuk ka ID valide.");
       return;
     }
 
     if (stock <= 0) {
-      setError(
-        t("orderPanel.outOfStock", {
-          product: product.name,
-        }),
-      );
+      setError(`${product.name} është jashtë stokut.`);
       return;
     }
 
@@ -370,7 +313,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   function handleIncreaseQuantity(productId) {
     if (!orderIsEditable) {
-      setError(t("orderPanel.orderNotEditable"));
+      setError("Porosia është dërguar dhe nuk mund të ndryshohet.");
       return;
     }
 
@@ -392,21 +335,14 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
       const stock = Number(product?.stock ?? existingItem.stock ?? 0);
 
       if (stock <= 0) {
-        setError(
-          t("orderPanel.outOfStock", {
-            product: existingItem.name,
-          }),
-        );
+        setError(`${existingItem.name} është jashtë stokut.`);
 
         return currentItems;
       }
 
       if (existingItem.quantity >= stock) {
         setError(
-          t("orderPanel.notEnoughStock", {
-            product: existingItem.name,
-            stock,
-          }),
+          `Nuk ka mjaftueshëm stok për ${existingItem.name}. Në dispozicion: ${stock}.`,
         );
 
         return currentItems;
@@ -426,7 +362,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   function handleDecreaseQuantity(productId) {
     if (!orderIsEditable) {
-      setError(t("orderPanel.orderNotEditable"));
+      setError("Porosia është dërguar dhe nuk mund të ndryshohet.");
       return;
     }
 
@@ -448,7 +384,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   function handleRemoveItem(productId) {
     if (!orderIsEditable) {
-      setError(t("orderPanel.orderNotEditable"));
+      setError("Porosia është dërguar dhe nuk mund të ndryshohet.");
       return;
     }
 
@@ -461,7 +397,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   function handleClearOrder() {
     if (!orderIsEditable) {
-      setError(t("orderPanel.orderNotEditable"));
+      setError("Porosia është dërguar dhe nuk mund të ndryshohet.");
       return;
     }
 
@@ -485,10 +421,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
         if (item.quantity >= stock) {
           setError(
-            t("orderPanel.notEnoughStock", {
-              product: item.name,
-              stock,
-            }),
+            `Nuk ka mjaftueshëm stok për ${item.name}. Në dispozicion: ${stock}.`,
           );
 
           return item;
@@ -543,24 +476,24 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   async function handleSaveOrder() {
     if (!table) {
-      setError(t("orderPanel.onlyDraftEditable"));
+      setError("Tavolina nuk është zgjedhur.");
       return;
     }
 
     if (!orderIsEditable) {
-      setError(t("orderPanel.addAtLeastOneProduct"));
+      setError("Vetëm porositë draft mund të ndryshohen.");
       return;
     }
 
     if (orderItems.length === 0) {
-      setError(t("orderPanel.tableIdMissing"));
+      setError("Shto të paktën një produkt.");
       return;
     }
 
     const tableId = getTableId(table);
 
     if (!tableId) {
-      setError(t("orderPanel.tableIdMissing"));
+      setError("ID e tavolinës mungon.");
       return;
     }
 
@@ -591,12 +524,10 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
       setSuccessMessage(
         currentOrderId
-          ? t("orderPanel.orderUpdated", {
-              total: Number(savedOrder.total).toFixed(2),
-            })
-          : t("orderPanel.orderSaved", {
-              total: Number(savedOrder.total).toFixed(2),
-            }),
+          ? `Porosia u përditësua. Totali: €${Number(savedOrder.total).toFixed(
+              2,
+            )}`
+          : `Porosia u ruajt. Totali: €${Number(savedOrder.total).toFixed(2)}`,
       );
 
       window.setTimeout(() => {
@@ -605,7 +536,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
     } catch (err) {
       console.error("Gabim gjatë ruajtjes:", err);
 
-      setError(err.message || t("orderPanel.orderSaveError"));
+      setError(err.message || "Porosia nuk mund të ruhet.");
     } finally {
       setSavingOrder(false);
     }
@@ -613,12 +544,12 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   async function handleSendAddedItems() {
     if (!currentOrderId) {
-      setError(t("orderPanel.noActiveOrder"));
+      setError("Nuk ka porosi aktive.");
       return;
     }
 
     if (newOrderItems.length === 0) {
-      setError(t("orderPanel.addAtLeastOneNewProduct"));
+      setError("Shto të paktën një produkt të ri.");
       return;
     }
 
@@ -650,14 +581,14 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
       await refreshTables(updatedOrder);
 
       setSuccessMessage(
-        t("orderPanel.addedItemsSent", {
-          total: Number(updatedOrder.total).toFixed(2),
-        }),
+        `Produktet shtesë u dërguan. Totali i ri: €${Number(
+          updatedOrder.total,
+        ).toFixed(2)}`,
       );
     } catch (err) {
       console.error("Gabim gjatë shtimit të produkteve:", err);
 
-      setError(err.message || t("orderPanel.addedItemsSendError"));
+      setError(err.message || "Produktet shtesë nuk mund të dërgohen.");
     } finally {
       setSavingOrder(false);
     }
@@ -665,12 +596,12 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   async function handleSendToKitchen() {
     if (!currentOrderId) {
-      setError(t("orderPanel.saveBeforeSend"));
+      setError("Ruaje porosinë para se ta dërgosh.");
       return;
     }
 
     if (currentOrderStatus !== "draft") {
-      setError(t("orderPanel.onlyDraftCanBeSent"));
+      setError("Vetëm porositë draft mund të dërgohen.");
       return;
     }
 
@@ -694,11 +625,11 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
       await refreshTables(updatedOrder);
 
-      setSuccessMessage(t("orderPanel.orderSent"));
+      setSuccessMessage("Porosia u dërgua me sukses.");
     } catch (err) {
       console.error("Gabim gjatë dërgimit të porosisë:", err);
 
-      setError(err.message || t("orderPanel.orderSendError"));
+      setError(err.message || "Porosia nuk mund të dërgohet.");
     } finally {
       setSendingToKitchen(false);
     }
@@ -706,7 +637,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
   async function handlePayOrder() {
     if (!currentOrderId) {
-      setError(t("orderPanel.saveBeforePayment"));
+      setError("Ruaje porosinë para pagesës.");
       return;
     }
 
@@ -719,13 +650,9 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
       await refreshTables(paidOrder);
 
       setSuccessMessage(
-        t("orderPanel.paymentCompleted", {
-          method:
-            paymentMethod === "cash"
-              ? t("orderPanel.cash")
-              : t("orderPanel.card"),
-          total: Number(paidOrder.total).toFixed(2),
-        }),
+        `Pagesa u krye me ${
+          paymentMethod === "cash" ? "Cash" : "Card"
+        }. Totali: €${Number(paidOrder.total).toFixed(2)}`,
       );
 
       window.setTimeout(() => {
@@ -734,19 +661,71 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
     } catch (err) {
       console.error("Gabim gjatë pagesës:", err);
 
-      setError(err.message || t("orderPanel.paymentError"));
+      setError(err.message || "Pagesa nuk mund të përfundohet.");
     } finally {
       setPayingOrder(false);
     }
   }
 
-  async function handleCancelOrder() {
+
+  async function handleComplimentaryRelease(event) {
+    event.preventDefault();
+
     if (!currentOrderId) {
-      setError(t("orderPanel.noActiveOrderToCancel"));
+      setError(t("complimentary.noActiveOrder"));
       return;
     }
 
-    const confirmed = window.confirm(t("orderPanel.cancelConfirm"));
+    if (!/^\d{4}$/.test(complimentaryPin)) {
+      setError(t("complimentary.pinInvalid"));
+      return;
+    }
+
+    if (complimentaryReason.trim().length < 3) {
+      setError(t("complimentary.reasonRequired"));
+      return;
+    }
+
+    try {
+      setReleasingComplimentary(true);
+      resetMessages();
+
+      const releasedOrder = await releaseOrderComplimentary(
+        currentOrderId,
+        {
+          admin_pin: complimentaryPin,
+          reason: complimentaryReason.trim(),
+        },
+      );
+
+      await reloadProducts();
+      await refreshTables(releasedOrder);
+
+      setComplimentaryOpen(false);
+      setComplimentaryPin("");
+      setComplimentaryReason("");
+      setSuccessMessage(t("complimentary.success"));
+
+      window.setTimeout(() => {
+        onClose();
+      }, 1100);
+    } catch (err) {
+      console.error("Complimentary release error:", err);
+      setError(err.message || t("complimentary.error"));
+    } finally {
+      setReleasingComplimentary(false);
+    }
+  }
+
+  async function handleCancelOrder() {
+    if (!currentOrderId) {
+      setError("Nuk ka porosi aktive për anulim.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "A je i sigurt që dëshiron ta anulosh këtë porosi?",
+    );
 
     if (!confirmed) {
       return;
@@ -767,7 +746,9 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
       await refreshTables(cancelledOrder);
 
-      setSuccessMessage(t("orderPanel.cancelSuccess"));
+      setSuccessMessage(
+        "Porosia u anulua, stock-u u rikthye dhe tavolina u lirua.",
+      );
 
       window.setTimeout(() => {
         onClose();
@@ -775,7 +756,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
     } catch (err) {
       console.error("Gabim gjatë anulimit të porosisë:", err);
 
-      setError(err.message || t("orderPanel.cancelError"));
+      setError(err.message || "Porosia nuk mund të anulohet.");
     } finally {
       setCancellingOrder(false);
     }
@@ -798,15 +779,11 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
           <div>
             <p className="order-panel-eyebrow">
               {currentOrderId
-                ? `${t("orderPanel.orderStatus")}: ${t(
-                    `orderPanel.status.${currentOrderStatus}`,
-                  )}`
-                : t("orderPanel.newOrder")}
+                ? `Order status: ${currentOrderStatus.replaceAll("_", " ")}`
+                : "New order"}
             </p>
 
-            <h2>
-              {t("orderPanel.table")} {table.number}
-            </h2>
+            <h2>Table {table.number}</h2>
           </div>
 
           <button
@@ -825,18 +802,16 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
           </div>
 
           <div className="order-table-text">
-            <h3>
-              {t("orderPanel.table")} {table.number}
-            </h3>
+            <h3>Table {table.number}</h3>
 
             <p>
               <MapPin size={15} />
-              t(`zones.${table.zone}`)
+              {table.zone}
             </p>
           </div>
 
           <span className={`order-status order-status-${table.status}`}>
-            {t(`tables.${table.status}`)}
+            {table.status}
           </span>
         </div>
 
@@ -858,7 +833,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
               <input
                 type="text"
                 value={searchTerm}
-                placeholder={t("orderPanel.searchProducts")}
+                placeholder="Search products..."
                 onChange={(event) => setSearchTerm(event.target.value)}
               />
 
@@ -881,16 +856,18 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                   }
                   onClick={() => setActiveCategory(category)}
                 >
-                  {category === "All" ? t("orderPanel.all") : category}
+                  {category}
                 </button>
               ))}
             </div>
 
             {panelIsLoading ? (
-              <div className="order-loading">{t("orderPanel.loading")}</div>
+              <div className="order-loading">
+                Të dhënat janë duke u ngarkuar...
+              </div>
             ) : filteredProducts.length === 0 ? (
               <div className="order-loading">
-                {t("orderPanel.noProductsInCategory")}
+                Nuk ka produkte në këtë kategori.
               </div>
             ) : (
               <div className="products-order-grid">
@@ -941,15 +918,15 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
                       {isOutOfStock ? (
                         <span className="order-stock-status order-stock-out">
-                          {t("orderPanel.outOfStockLabel")}
+                          Out of Stock
                         </span>
                       ) : isLowStock ? (
                         <span className="order-stock-status order-stock-low">
-                          {t("orderPanel.onlyStockLeft", { stock })}
+                          Only {stock} left
                         </span>
                       ) : (
                         <span className="order-stock-status order-stock-good">
-                          {t("orderPanel.stock", { stock })}
+                          Stock: {stock}
                         </span>
                       )}
 
@@ -970,11 +947,9 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
           <section className="cart-section">
             <div className="cart-header">
               <div>
-                <h3>{t("orderPanel.currentOrder")}</h3>
+                <h3>Current order</h3>
 
-                <p>
-                  {totalItems} {t("orderPanel.items")}
-                </p>
+                <p>{totalItems} items</p>
               </div>
 
               {orderItems.length > 0 && (
@@ -984,7 +959,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                   disabled={actionInProgress || !orderIsEditable}
                   onClick={handleClearOrder}
                 >
-                  {t("orderPanel.clear")}
+                  Clear
                 </button>
               )}
             </div>
@@ -994,11 +969,12 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                 <div className="empty-order-icon">
                   <ShoppingCart size={32} />
                 </div>
-                <h3>{t("orderPanel.noProductsAdded")}</h3>
+
+                <h3>No products added</h3>
               </div>
             ) : (
               <div className="order-items-list">
-                {orderItems.map((item, index) => {
+                {orderItems.map((item) => {
                   const product = products.find(
                     (currentProduct) =>
                       getProductId(currentProduct) === item.productId,
@@ -1011,10 +987,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                   const maxReached = item.quantity >= availableStock;
 
                   return (
-                    <article
-                      key={`${item.productId}-${index}`}
-                      className="order-item"
-                    >
+                    <article key={item.productId} className="order-item">
                       <div className="order-item-main">
                         <div>
                           <h4>{item.name}</h4>
@@ -1023,9 +996,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
 
                           {availableStock <= 10 ? (
                             <small className="order-item-stock-warning">
-                              {t("orderPanel.stock", {
-                                stock: availableStock,
-                              })}
+                              Stock: {availableStock}
                             </small>
                           ) : null}
                         </div>
@@ -1084,8 +1055,8 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                 <div className="added-items-section">
                   <div className="added-items-header">
                     <div>
-                      <h4>{t("orderPanel.newItems")}</h4>
-                      <p>{t("orderPanel.notSentYetDescription")}</p>
+                      <h4>New items</h4>
+                      <p>These items have not been sent yet.</p>
                     </div>
 
                     <span>{totalNewItems}</span>
@@ -1116,7 +1087,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                               <p>€{Number(item.price).toFixed(2)}</p>
 
                               <small className="new-item-label">
-                                {t("orderPanel.notSentYet")}
+                                Not sent yet
                               </small>
                             </div>
 
@@ -1179,7 +1150,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                   onClick={() => setPaymentMethod("cash")}
                 >
                   <Banknote size={16} />
-                  {t("orderPanel.cash")}
+                  Cash
                 </button>
 
                 <button
@@ -1202,11 +1173,9 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
         <footer className="order-panel-footer">
           <div className="order-total-row">
             <div>
-              <span>{t("orderPanel.total")}</span>
+              <span>Total</span>
 
-              <small>
-                {totalItems} {t("orderPanel.items")}
-              </small>
+              <small>{totalItems} items</small>
             </div>
 
             <strong>€{orderTotal.toFixed(2)}</strong>
@@ -1221,12 +1190,9 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                   disabled={orderItems.length === 0 || actionInProgress}
                   onClick={handleSendToKitchen}
                 >
-                  {sendingToKitchen
-                    ? t("orderPanel.sendingOrder")
-                    : t("orderPanel.sendOrder")}
+                  {sendingToKitchen ? "Sending order..." : "Send Order"}
                 </button>
               )}
-
               {currentOrderId &&
                 currentOrderStatus !== "draft" &&
                 newOrderItems.length > 0 && (
@@ -1236,12 +1202,9 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                     disabled={actionInProgress}
                     onClick={handleSendAddedItems}
                   >
-                    {t("orderPanel.sendAddedItems", {
-                      count: totalNewItems,
-                    })}
+                    Send Added Items ({totalNewItems})
                   </button>
                 )}
-
               <button
                 type="button"
                 className="save-order-button"
@@ -1252,9 +1215,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                 }
                 onClick={handleSaveOrder}
               >
-                {savingOrder
-                  ? t("orderPanel.saving")
-                  : t("orderPanel.saveDraft")}
+                {savingOrder ? "Saving..." : "Save Draft"}
 
                 {!savingOrder && <ChevronRight size={18} />}
               </button>
@@ -1269,111 +1230,26 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
                 }}
               >
                 {payingOrder
-                  ? t("orderPanel.processingPayment")
-                  : t("orderPanel.payWith", {
-                      method:
-                        paymentMethod === "cash"
-                          ? t("orderPanel.cash")
-                          : t("orderPanel.card"),
-                    })}
+                  ? "Processing payment..."
+                  : `Pay with ${paymentMethod === "cash" ? "Cash" : "Card"}`}
               </button>
 
-              {currentOrderStatus !== "paid" &&
-                currentOrderStatus !== "cancelled" && (
-                  <>
-                    <button
-                      type="button"
-                      className="save-order-button"
-                      disabled={actionInProgress}
-                      onClick={() => {
-                        setShowTableTransfer((currentValue) => !currentValue);
-                        setSelectedTransferTableId("");
-                        resetMessages();
-                      }}
-                      style={{
-                        marginTop: "10px",
-                      }}
-                    >
-                      <Armchair size={18} />
-                      {t("orderPanel.changeTable")}
-                    </button>
 
-                    {showTableTransfer && (
-                      <div className="table-transfer-box">
-                        <div className="table-transfer-header">
-                          <div>
-                            <strong>{t("orderPanel.changeTableTitle")}</strong>
-                            <p>{t("orderPanel.changeTableDescription")}</p>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowTableTransfer(false);
-                              setSelectedTransferTableId("");
-                            }}
-                            disabled={transferringTable}
-                            aria-label={t("orderPanel.close")}
-                          >
-                            <X size={18} />
-                          </button>
-                        </div>
-
-                        {freeTables.length === 0 ? (
-                          <p>{t("orderPanel.noFreeTables")}</p>
-                        ) : (
-                          <>
-                            <div className="table-transfer-options">
-                              {freeTables.map((freeTable) => {
-                                const tableId = getTableId(freeTable);
-                                const isSelected =
-                                  selectedTransferTableId === tableId;
-
-                                return (
-                                  <button
-                                    key={tableId}
-                                    type="button"
-                                    className={`table-transfer-option ${
-                                      isSelected ? "selected" : ""
-                                    }`}
-                                    onClick={() =>
-                                      setSelectedTransferTableId(tableId)
-                                    }
-                                    disabled={transferringTable}
-                                  >
-                                    <span>
-                                      {t("orderPanel.table")} {freeTable.number}
-                                    </span>
-
-                                    <small>
-                                      {t(`zones.${freeTable.zone}`)}
-                                    </small>
-                                  </button>
-                                );
-                              })}
-                            </div>
-
-                            <button
-                              type="button"
-                              className="save-order-button"
-                              onClick={handleTransferTable}
-                              disabled={
-                                !selectedTransferTableId || transferringTable
-                              }
-                              style={{
-                                marginTop: "10px",
-                              }}
-                            >
-                              {transferringTable
-                                ? t("orderPanel.transferringTable")
-                                : t("orderPanel.confirmTransfer")}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
+              {canUseComplimentary && (
+                <button
+                  type="button"
+                  className="complimentary-order-button"
+                  disabled={actionInProgress}
+                  onClick={() => {
+                    resetMessages();
+                    setComplimentaryPin("");
+                    setComplimentaryReason("");
+                    setComplimentaryOpen(true);
+                  }}
+                >
+                  {t("complimentary.releaseButton")}
+                </button>
+              )}
 
               <button
                 type="button"
@@ -1383,9 +1259,7 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
               >
                 <XCircle size={18} />
 
-                {cancellingOrder
-                  ? t("orderPanel.cancelling")
-                  : t("orderPanel.cancelOrder")}
+                {cancellingOrder ? "Cancelling..." : "Cancel order"}
               </button>
             </>
           ) : (
@@ -1395,12 +1269,104 @@ function OrderPanel({ table, onClose, onOrderSaved }) {
               disabled={orderItems.length === 0 || actionInProgress}
               onClick={handleSaveOrder}
             >
-              {savingOrder ? t("orderPanel.saving") : t("orderPanel.saveDraft")}
+              {savingOrder ? "Saving..." : "Save Draft"}
 
               {!savingOrder && <ChevronRight size={18} />}
             </button>
           )}
         </footer>
+
+        {canUseComplimentary && complimentaryOpen && (
+          <div
+            className="complimentary-modal-overlay"
+            onClick={
+              releasingComplimentary
+                ? undefined
+                : () => setComplimentaryOpen(false)
+            }
+          >
+            <form
+              className="complimentary-modal"
+              onSubmit={handleComplimentaryRelease}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="complimentary-modal-header">
+                <div>
+                  <span>{t("complimentary.eyebrow")}</span>
+                  <h3>{t("complimentary.title")}</h3>
+                </div>
+
+                <button
+                  type="button"
+                  className="complimentary-modal-close"
+                  disabled={releasingComplimentary}
+                  onClick={() => setComplimentaryOpen(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="complimentary-modal-description">
+                {t("complimentary.description")}
+              </p>
+
+              <label className="complimentary-field">
+                <span>{t("complimentary.adminPin")}</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  autoComplete="off"
+                  value={complimentaryPin}
+                  onChange={(event) =>
+                    setComplimentaryPin(
+                      event.target.value.replace(/\D/g, "").slice(0, 4),
+                    )
+                  }
+                  placeholder="••••"
+                />
+              </label>
+
+              <label className="complimentary-field">
+                <span>{t("complimentary.reason")}</span>
+                <textarea
+                  rows={3}
+                  maxLength={240}
+                  value={complimentaryReason}
+                  onChange={(event) =>
+                    setComplimentaryReason(event.target.value)
+                  }
+                  placeholder={t("complimentary.reasonPlaceholder")}
+                />
+              </label>
+
+              <div className="complimentary-warning">
+                {t("complimentary.warning")}
+              </div>
+
+              <div className="complimentary-modal-actions">
+                <button
+                  type="button"
+                  className="complimentary-secondary"
+                  disabled={releasingComplimentary}
+                  onClick={() => setComplimentaryOpen(false)}
+                >
+                  {t("common.cancel")}
+                </button>
+
+                <button
+                  type="submit"
+                  className="complimentary-primary"
+                  disabled={releasingComplimentary}
+                >
+                  {releasingComplimentary
+                    ? t("complimentary.processing")
+                    : t("complimentary.confirm")}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </aside>
     </div>
   );

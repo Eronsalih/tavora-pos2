@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.subscription_access import require_standard_plan
 from app.database.mongodb import database
 from app.routers.auth import (
     get_current_user,
@@ -153,6 +154,22 @@ async def calculate_daily_report(
         2,
     )
 
+    complimentary_orders = [
+        order
+        for order in orders
+        if order.get("payment_method") == "complimentary"
+    ]
+
+    complimentary_count = len(complimentary_orders)
+
+    complimentary_total = round(
+        sum(
+            float(order.get("complimentary_original_total", 0))
+            for order in complimentary_orders
+        ),
+        2,
+    )
+
     total_sales = round(
         cash_total + card_total,
         2,
@@ -167,6 +184,8 @@ async def calculate_daily_report(
         "items_sold": items_sold,
         "cash_total": cash_total,
         "card_total": card_total,
+        "complimentary_count": complimentary_count,
+        "complimentary_total": complimentary_total,
         "total_sales": total_sales,
     }
 
@@ -210,6 +229,10 @@ async def get_report_waiters(
     current_user: Annotated[
         dict,
         Depends(get_current_user),
+    ],
+    _: Annotated[
+        dict,
+        Depends(require_standard_plan),
     ],
 ):
     business_id = get_business_object_id(
@@ -333,6 +356,8 @@ async def close_daily_report(
         "items_sold": report["items_sold"],
         "cash_total": report["cash_total"],
         "card_total": report["card_total"],
+        "complimentary_count": report["complimentary_count"],
+        "complimentary_total": report["complimentary_total"],
         "total_sales": report["total_sales"],
         "closed_at": current_time,
         "closed_by_user_id": current_user["id"],
@@ -354,6 +379,8 @@ async def close_daily_report(
         "items_sold": closed_report["items_sold"],
         "cash_total": closed_report["cash_total"],
         "card_total": closed_report["card_total"],
+        "complimentary_count": closed_report["complimentary_count"],
+        "complimentary_total": closed_report["complimentary_total"],
         "total_sales": closed_report["total_sales"],
         "closed_at": current_time.isoformat(),
         "closed_by_user_id": closed_report[

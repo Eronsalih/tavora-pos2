@@ -1,61 +1,77 @@
 import api from "./api";
 
-const PLATFORM_ADMIN_BASE_URL = "/api/platform-admin";
-
-// =========================================================
-// DASHBOARD
-// =========================================================
 
 export async function getPlatformDashboard() {
-  const response = await api.get(`${PLATFORM_ADMIN_BASE_URL}/dashboard`);
-
+  const response = await api.get(
+    "/api/platform-admin/dashboard",
+  );
   return response.data;
 }
 
-// =========================================================
-// BUSINESSES
-// =========================================================
 
 export async function getPlatformBusinesses(params = {}) {
-  const response = await api.get(`${PLATFORM_ADMIN_BASE_URL}/businesses`, {
-    params,
-  });
-
-  return response.data;
-}
-
-export async function getPlatformBusinessById(businessId) {
-  if (!businessId) {
-    throw new Error("Business ID is required.");
-  }
-
   const response = await api.get(
-    `${PLATFORM_ADMIN_BASE_URL}/businesses/${businessId}`,
+    "/api/platform-admin/businesses",
+    { params },
   );
-
   return response.data;
 }
 
-// =========================================================
-// SUBSCRIPTIONS
-// =========================================================
 
-export async function getPlatformSubscriptions(params = {}) {
-  const response = await api.get(`${PLATFORM_ADMIN_BASE_URL}/subscriptions`, {
-    params,
-  });
-
+export async function getPlatformPayments() {
+  const response = await api.get(
+    "/api/platform-admin/payments",
+  );
   return response.data;
 }
 
-// =========================================================
-// PAYMENTS
-// =========================================================
 
-export async function getPlatformPayments(params = {}) {
-  const response = await api.get(`${PLATFORM_ADMIN_BASE_URL}/payments`, {
-    params,
-  });
+export async function setPlatformBusinessEnabled(
+  businessId,
+  enabled,
+) {
+  const response = await api.patch(
+    `/api/platform-admin/businesses/${businessId}/enabled`,
+    null,
+    { params: { enabled } },
+  );
+  return response.data;
+}
 
+
+export async function activatePlatformBusiness(
+  businessId,
+  data,
+) {
+  const response = await api.post(
+    `/api/platform-admin/businesses/${businessId}/activate`,
+    data,
+  );
+  return response.data;
+}
+
+
+export async function setPlatformSubscriptionStatus(
+  businessId,
+  subscriptionStatus,
+) {
+  const response = await api.patch(
+    `/api/platform-admin/businesses/${businessId}/subscription-status`,
+    null,
+    {
+      params: {
+        subscription_status: subscriptionStatus,
+      },
+    },
+  );
+  return response.data;
+}
+
+
+export async function getPlatformAudit(params = {}) {
+  const response = await api.get(
+    "/api/platform-admin/audit",
+    { params },
+  );
   return response.data;
 }

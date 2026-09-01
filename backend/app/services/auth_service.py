@@ -82,9 +82,7 @@ async def get_user_document_by_id(
 async def get_user_by_email(
     email: str,
 ) -> dict[str, Any] | None:
-    user = await get_user_document_by_email(
-        email
-    )
+    user = await get_user_document_by_email(email)
 
     if not user:
         return None
@@ -95,9 +93,7 @@ async def get_user_by_email(
 async def get_user_by_id(
     user_id: str,
 ) -> dict[str, Any] | None:
-    user = await get_user_document_by_id(
-        user_id
-    )
+    user = await get_user_document_by_id(user_id)
 
     if not user:
         return None
@@ -126,10 +122,7 @@ async def create_user(
         business_id
     )
 
-    if (
-        business_id is not None
-        and normalized_business_id is None
-    ):
+    if business_id is not None and normalized_business_id is None:
         raise ValueError(
             "Invalid business ID.",
         )
@@ -149,9 +142,7 @@ async def create_user(
     }
 
     if normalized_business_id is not None:
-        user_document["business_id"] = (
-            normalized_business_id
-        )
+        user_document["business_id"] = normalized_business_id
 
     if user_data.business_name:
         user_document["business_name"] = (
@@ -159,17 +150,14 @@ async def create_user(
         )
 
     if user_data.pin:
-        user_document["hashed_pin"] = (
-            hash_password(
-                user_data.pin
-            )
+        user_document["hashed_pin"] = hash_password(
+            user_data.pin,
         )
 
     try:
         result = await users_collection.insert_one(
-            user_document
+            user_document,
         )
-
     except DuplicateKeyError as error:
         raise ValueError(
             "A user with this email already exists.",
@@ -183,12 +171,10 @@ async def create_user(
 
     if not created_user:
         raise RuntimeError(
-            "User was created but could not be loaded."
+            "User was created but could not be loaded.",
         )
 
-    return serialize_user(
-        created_user
-    )
+    return serialize_user(created_user)
 
 
 async def create_platform_superadmin(
@@ -212,9 +198,7 @@ async def create_platform_superadmin(
     user_document = {
         "name": name.strip(),
         "email": normalized_email,
-        "hashed_password": hash_password(
-            password
-        ),
+        "hashed_password": hash_password(password),
         "role": "superadmin",
         "is_active": True,
         "created_at": now,
@@ -225,7 +209,6 @@ async def create_platform_superadmin(
         result = await users_collection.insert_one(
             user_document
         )
-
     except DuplicateKeyError as error:
         raise ValueError(
             "A user with this email already exists."
@@ -242,31 +225,22 @@ async def create_platform_superadmin(
             "Superadmin was created but could not be loaded."
         )
 
-    return serialize_user(
-        created_user
-    )
+    return serialize_user(created_user)
 
 
 async def authenticate_user(
     email: str,
     password: str,
 ) -> dict[str, Any] | None:
-    user = await get_user_document_by_email(
-        email
-    )
+    user = await get_user_document_by_email(email)
 
     if not user:
         return None
 
-    if not user.get(
-        "is_active",
-        True,
-    ):
+    if not user.get("is_active", True):
         return None
 
-    hashed_password = user.get(
-        "hashed_password"
-    )
+    hashed_password = user.get("hashed_password")
 
     if not hashed_password:
         return None
@@ -277,33 +251,31 @@ async def authenticate_user(
     ):
         return None
 
-    return serialize_user(
-        user
-    )
+    return serialize_user(user)
 
 
 async def authenticate_user_by_pin(
     pin: str,
     business_id: str,
 ) -> dict[str, Any] | None:
-    if not ObjectId.is_valid(business_id):
-        return None
-
-    tenant_business_id = ObjectId(
+    business_object_id = normalize_business_id(
         business_id
     )
 
+    if business_object_id is None:
+        return None
+
     cursor = users_collection.find(
         {
-            "business_id": tenant_business_id,
+            "business_id": business_object_id,
+            "is_active": True,
             "role": {
                 "$in": [
                     "admin",
                     "cashier",
                     "waiter",
-                ]
+                ],
             },
-            "is_active": True,
             "hashed_pin": {
                 "$exists": True,
             },
@@ -311,9 +283,7 @@ async def authenticate_user_by_pin(
     )
 
     async for user in cursor:
-        hashed_pin = user.get(
-            "hashed_pin"
-        )
+        hashed_pin = user.get("hashed_pin")
 
         if not hashed_pin:
             continue
@@ -322,9 +292,7 @@ async def authenticate_user_by_pin(
             pin,
             hashed_pin,
         ):
-            return serialize_user(
-                user
-            )
+            return serialize_user(user)
 
     return None
 
@@ -334,9 +302,7 @@ async def set_user_pin(
     pin: str,
     business_id: str,
 ) -> dict[str, Any] | None:
-    if not ObjectId.is_valid(
-        user_id
-    ):
+    if not ObjectId.is_valid(user_id):
         return None
 
     business_object_id = normalize_business_id(
@@ -346,24 +312,16 @@ async def set_user_pin(
     if business_object_id is None:
         return None
 
-    user_object_id = ObjectId(
-        user_id
-    )
-
-    now = datetime.now(
-        timezone.utc
-    )
+    now = datetime.now(timezone.utc)
 
     result = await users_collection.update_one(
         {
-            "_id": user_object_id,
+            "_id": ObjectId(user_id),
             "business_id": business_object_id,
         },
         {
             "$set": {
-                "hashed_pin": hash_password(
-                    pin
-                ),
+                "hashed_pin": hash_password(pin),
                 "updated_at": now,
             },
         },
@@ -374,7 +332,7 @@ async def set_user_pin(
 
     updated_user = await users_collection.find_one(
         {
-            "_id": user_object_id,
+            "_id": ObjectId(user_id),
             "business_id": business_object_id,
         }
     )
@@ -382,9 +340,7 @@ async def set_user_pin(
     if not updated_user:
         return None
 
-    return serialize_user(
-        updated_user
-    )
+    return serialize_user(updated_user)
 
 
 async def create_admin(
@@ -433,9 +389,7 @@ async def get_users(
 
     async for user in cursor:
         users.append(
-            serialize_user(
-                user
-            )
+            serialize_user(user)
         )
 
     return users
@@ -446,9 +400,7 @@ async def update_user(
     user_data,
     business_id: str,
 ) -> dict | None:
-    if not ObjectId.is_valid(
-        user_id
-    ):
+    if not ObjectId.is_valid(user_id):
         return None
 
     business_object_id = normalize_business_id(
@@ -458,13 +410,11 @@ async def update_user(
     if business_object_id is None:
         return None
 
-    user_object_id = ObjectId(
-        user_id
-    )
+    object_id = ObjectId(user_id)
 
     existing_user = await users_collection.find_one(
         {
-            "_id": user_object_id,
+            "_id": object_id,
             "business_id": business_object_id,
         }
     )
@@ -480,7 +430,7 @@ async def update_user(
         {
             "email": normalized_email,
             "_id": {
-                "$ne": user_object_id,
+                "$ne": object_id,
             },
         }
     )
@@ -492,7 +442,7 @@ async def update_user(
 
     await users_collection.update_one(
         {
-            "_id": user_object_id,
+            "_id": object_id,
             "business_id": business_object_id,
         },
         {
@@ -503,13 +453,13 @@ async def update_user(
                 "updated_at": datetime.now(
                     timezone.utc
                 ),
-            },
+            }
         },
     )
 
     updated_user = await users_collection.find_one(
         {
-            "_id": user_object_id,
+            "_id": object_id,
             "business_id": business_object_id,
         }
     )
@@ -517,9 +467,7 @@ async def update_user(
     if not updated_user:
         return None
 
-    return serialize_user(
-        updated_user
-    )
+    return serialize_user(updated_user)
 
 
 async def set_user_status(
@@ -527,9 +475,7 @@ async def set_user_status(
     is_active: bool,
     business_id: str,
 ) -> dict | None:
-    if not ObjectId.is_valid(
-        user_id
-    ):
+    if not ObjectId.is_valid(user_id):
         return None
 
     business_object_id = normalize_business_id(
@@ -539,13 +485,11 @@ async def set_user_status(
     if business_object_id is None:
         return None
 
-    user_object_id = ObjectId(
-        user_id
-    )
+    object_id = ObjectId(user_id)
 
     result = await users_collection.update_one(
         {
-            "_id": user_object_id,
+            "_id": object_id,
             "business_id": business_object_id,
         },
         {
@@ -554,7 +498,7 @@ async def set_user_status(
                 "updated_at": datetime.now(
                     timezone.utc
                 ),
-            },
+            }
         },
     )
 
@@ -563,7 +507,7 @@ async def set_user_status(
 
     updated_user = await users_collection.find_one(
         {
-            "_id": user_object_id,
+            "_id": object_id,
             "business_id": business_object_id,
         }
     )
@@ -571,6 +515,4 @@ async def set_user_status(
     if not updated_user:
         return None
 
-    return serialize_user(
-        updated_user
-    )
+    return serialize_user(updated_user)

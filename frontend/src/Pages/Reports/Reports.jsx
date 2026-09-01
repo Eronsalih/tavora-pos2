@@ -17,6 +17,9 @@ import {
   getReportWaiters,
 } from "../../services/reportService";
 
+import { useAuth } from "../../context/AuthContext";
+import { hasMinimumPlan } from "../../utils/subscriptionPlans";
+
 import "./Reports.css";
 
 function getTodayDateValue() {
@@ -31,6 +34,12 @@ function getTodayDateValue() {
 
 function Reports() {
   const { t, i18n } = useTranslation();
+  const { subscription } = useAuth();
+
+  const canUseWaiterReports = hasMinimumPlan(
+    subscription?.plan || "none",
+    "standard",
+  );
   const [reportDate, setReportDate] = useState(getTodayDateValue());
 
   const [waiters, setWaiters] = useState([]);
@@ -56,6 +65,12 @@ function Reports() {
   const currentLocale = localeMap[i18n.language] || "en-GB";
 
   async function loadWaiters() {
+    if (!canUseWaiterReports) {
+      setWaiters([]);
+      setSelectedWaiterId("");
+      return "";
+    }
+
     const data = await getReportWaiters();
 
     const waiterList = Array.isArray(data) ? data : [];
@@ -64,7 +79,6 @@ function Reports() {
 
     if (waiterList.length > 0 && !selectedWaiterId) {
       setSelectedWaiterId(waiterList[0].id);
-
       return waiterList[0].id;
     }
 
@@ -157,7 +171,10 @@ function Reports() {
   }
 
   async function handleCloseAndPrint() {
-    if (!selectedWaiterId || !reportDate) {
+    if (
+      !reportDate ||
+      (canUseWaiterReports && !selectedWaiterId)
+    ) {
       setError(t("reports.selectWaiterAndDate"));
       return;
     }
@@ -184,7 +201,9 @@ function Reports() {
 
       const closedReport = await closeDailyReport({
         reportDate,
-        waiterId: selectedWaiterId,
+        waiterId: canUseWaiterReports
+          ? selectedWaiterId
+          : undefined,
       });
 
       setCloseSuccess(
@@ -326,24 +345,28 @@ function Reports() {
           />
         </div>
 
-        <div className="reports-filter-group">
-          <label htmlFor="report-waiter">
-            <UserRound size={17} />
-            {t("reports.waiter")}
-          </label>
+        {canUseWaiterReports && (
+          <div className="reports-filter-group">
+            <label htmlFor="report-waiter">
+              <UserRound size={17} />
+              {t("reports.waiter")}
+            </label>
 
-          <select
-            id="report-waiter"
-            value={selectedWaiterId}
-            onChange={(event) => setSelectedWaiterId(event.target.value)}
-          >
-            {waiters.map((waiter) => (
-              <option key={waiter.id} value={waiter.id}>
-                {waiter.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            <select
+              id="report-waiter"
+              value={selectedWaiterId}
+              onChange={(event) =>
+                setSelectedWaiterId(event.target.value)
+              }
+            >
+              {waiters.map((waiter) => (
+                <option key={waiter.id} value={waiter.id}>
+                  {waiter.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="reports-selected-summary">
           <span>{t("reports.selectedReport")}</span>

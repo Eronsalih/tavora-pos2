@@ -1,60 +1,38 @@
-import { Navigate, Outlet } from "react-router-dom";
-
 import { LoaderCircle } from "lucide-react";
+import { Navigate, Outlet } from "react-router-dom";
 
 import { useAuth } from "../../context/AuthContext";
 
-function PublicRoute() {
-  const { user, isAuthenticated, loading } = useAuth();
 
-  // =====================================================
-  // LOADING
-  // =====================================================
+export default function PublicRoute() {
+  const { user, isAuthenticated, loading } = useAuth();
 
   if (loading) {
     return (
       <main
         style={{
-          display: "grid",
           minHeight: "100vh",
+          display: "grid",
           placeItems: "center",
-          background: "#f5f6fb",
-          color: "#6d5dfc",
         }}
       >
-        <LoaderCircle
-          size={34}
-          style={{
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
+        <LoaderCircle size={34} />
       </main>
     );
   }
 
-  // =====================================================
-  // ALREADY AUTHENTICATED
-  // =====================================================
-
   if (isAuthenticated) {
-    /*
-     * Tavora platform owner
-     */
-    if (user?.role === "superadmin") {
-      return <Navigate to="/owner" replace />;
-    }
-
-    /*
-     * Restaurant users
-     */
-    return <Navigate to="/" replace />;
+    return (
+      <Navigate
+        to={
+          user?.role === "superadmin"
+            ? "/platform-admin"
+            : "/"
+        }
+        replace
+      />
+    );
   }
-
-  // =====================================================
-  // PUBLIC PAGE
-  // =====================================================
 
   return <Outlet />;
 }
-
-export default PublicRoute;

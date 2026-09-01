@@ -1,12 +1,7 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    status,
-)
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import (
     HTTPAuthorizationCredentials,
     HTTPBearer,
@@ -16,9 +11,7 @@ from app.core.security import (
     create_access_token,
     decode_access_token,
 )
-
 from app.schemas.business import BusinessSignup
-
 from app.schemas.user import (
     OwnerSignup,
     SubscriptionResponse,
@@ -31,7 +24,6 @@ from app.schemas.user import (
     UserStatusUpdate,
     UserUpdate,
 )
-
 from app.services.auth_service import (
     authenticate_user,
     authenticate_user_by_pin,
@@ -42,7 +34,6 @@ from app.services.auth_service import (
     set_user_status,
     update_user,
 )
-
 from app.services.business_service import (
     create_business_account,
     get_business_by_id,
@@ -58,11 +49,6 @@ router = APIRouter(
 bearer_scheme = HTTPBearer(
     auto_error=False,
 )
-
-
-# =========================================================
-# CURRENT USER
-# =========================================================
 
 
 async def get_current_user(
@@ -87,50 +73,28 @@ async def get_current_user(
 
     token = credentials.credentials
 
-    payload = decode_access_token(
-        token
-    )
+    payload = decode_access_token(token)
 
     if payload is None:
         raise credentials_exception
 
-    user_id = payload.get(
-        "sub"
-    )
+    user_id = payload.get("sub")
 
-    if (
-        not user_id
-        or not isinstance(
-            user_id,
-            str,
-        )
-    ):
+    if not user_id or not isinstance(user_id, str):
         raise credentials_exception
 
-    user = await get_user_by_id(
-        user_id
-    )
+    user = await get_user_by_id(user_id)
 
     if user is None:
         raise credentials_exception
 
-    if not user.get(
-        "is_active",
-        True,
-    ):
+    if not user.get("is_active", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "This user account is inactive."
-            ),
+            detail="This user account is inactive.",
         )
 
     return user
-
-
-# =========================================================
-# ADMIN GUARD
-# =========================================================
 
 
 async def require_admin(
@@ -139,35 +103,13 @@ async def require_admin(
         Depends(get_current_user),
     ],
 ) -> dict:
-    if current_user.get(
-        "role"
-    ) != "admin":
+    if current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Administrator access is required."
-            ),
-        )
-
-    business_id = current_user.get(
-        "business_id"
-    )
-
-    if not business_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Administrator is not attached "
-                "to a business."
-            ),
+            detail="Administrator access is required.",
         )
 
     return current_user
-
-
-# =========================================================
-# ACTIVE SUBSCRIPTION GUARD
-# =========================================================
 
 
 async def require_active_subscription(
@@ -176,9 +118,7 @@ async def require_active_subscription(
         Depends(get_current_user),
     ],
 ) -> dict:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -196,69 +136,40 @@ async def require_active_subscription(
             detail="Business was not found.",
         )
 
-    if not business.get(
-        "is_active",
-        True,
-    ):
+    if business.get("is_active") is False:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "This business account is disabled."
-            ),
+            detail="This business account is inactive.",
         )
 
-    subscription_status = business.get(
-        "subscription_status"
-    )
-
-    if subscription_status != "active":
+    if business.get("subscription_status") != "active":
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=(
-                "An active subscription is required."
-            ),
+            detail="An active Tavora subscription is required.",
         )
 
     expires_at = business.get(
         "subscription_expires_at"
     )
 
-    if expires_at is not None:
-        if not isinstance(
-            expires_at,
-            datetime,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=(
-                    "Subscription expiration "
-                    "date is invalid."
-                ),
-            )
-
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(
-                tzinfo=timezone.utc
-            )
-
-        now = datetime.now(
-            timezone.utc
+    if expires_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="The Tavora subscription has expired.",
         )
 
-        if expires_at <= now:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=(
-                    "The subscription has expired."
-                ),
-            )
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(
+            tzinfo=timezone.utc
+        )
+
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="The Tavora subscription has expired.",
+        )
 
     return current_user
-
-
-# =========================================================
-# LOGIN
-# =========================================================
 
 
 @router.post(
@@ -269,18 +180,14 @@ async def login(
     credentials: UserLogin,
 ) -> TokenResponse:
     user = await authenticate_user(
-        email=str(
-            credentials.email
-        ),
+        email=str(credentials.email),
         password=credentials.password,
     )
 
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=(
-                "Email or password is incorrect."
-            ),
+            detail="Email or password is incorrect.",
             headers={
                 "WWW-Authenticate": "Bearer",
             },
@@ -297,15 +204,8 @@ async def login(
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
-        user=UserResponse(
-            **user
-        ),
+        user=UserResponse(**user),
     )
-
-
-# =========================================================
-# PIN LOGIN - TENANT SCOPED
-# =========================================================
 
 
 @router.post(
@@ -323,9 +223,7 @@ async def pin_login(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=(
-                "Employee PIN is incorrect."
-            ),
+            detail="Employee PIN is incorrect.",
             headers={
                 "WWW-Authenticate": "Bearer",
             },
@@ -342,15 +240,8 @@ async def pin_login(
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
-        user=UserResponse(
-            **user
-        ),
+        user=UserResponse(**user),
     )
-
-
-# =========================================================
-# GET CURRENT USER
-# =========================================================
 
 
 @router.get(
@@ -363,14 +254,7 @@ async def get_me(
         Depends(get_current_user),
     ],
 ) -> UserResponse:
-    return UserResponse(
-        **current_user
-    )
-
-
-# =========================================================
-# GET BUSINESS SUBSCRIPTION
-# =========================================================
+    return UserResponse(**current_user)
 
 
 @router.get(
@@ -383,9 +267,7 @@ async def get_subscription(
         Depends(get_current_user),
     ],
 ) -> SubscriptionResponse:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -405,12 +287,8 @@ async def get_subscription(
 
     return SubscriptionResponse(
         business_id=business["id"],
-        plan=business[
-            "subscription_plan"
-        ],
-        status=business[
-            "subscription_status"
-        ],
+        plan=business["subscription_plan"],
+        status=business["subscription_status"],
         started_at=business[
             "subscription_started_at"
         ],
@@ -421,11 +299,6 @@ async def get_subscription(
             "payment_provider"
         ],
     )
-
-
-# =========================================================
-# BUSINESS OWNER SIGNUP
-# =========================================================
 
 
 @router.post(
@@ -452,19 +325,10 @@ async def signup(
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(
-                error
-            ),
+            detail=str(error),
         ) from error
 
-    return UserResponse(
-        **user
-    )
-
-
-# =========================================================
-# USERS - CREATE
-# =========================================================
+    return UserResponse(**user)
 
 
 @router.post(
@@ -479,9 +343,7 @@ async def register_user(
         Depends(require_admin),
     ],
 ) -> UserResponse:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -498,19 +360,10 @@ async def register_user(
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(
-                error
-            ),
+            detail=str(error),
         ) from error
 
-    return UserResponse(
-        **created_user
-    )
-
-
-# =========================================================
-# USERS - READ
-# =========================================================
+    return UserResponse(**created_user)
 
 
 @router.get(
@@ -523,9 +376,7 @@ async def list_users(
         Depends(require_admin),
     ],
 ) -> list[UserResponse]:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -538,16 +389,9 @@ async def list_users(
     )
 
     return [
-        UserResponse(
-            **user
-        )
+        UserResponse(**user)
         for user in users
     ]
-
-
-# =========================================================
-# USERS - UPDATE
-# =========================================================
 
 
 @router.put(
@@ -562,9 +406,7 @@ async def edit_user(
         Depends(require_admin),
     ],
 ) -> UserResponse:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -582,9 +424,7 @@ async def edit_user(
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(
-                error
-            ),
+            detail=str(error),
         ) from error
 
     if updated_user is None:
@@ -593,14 +433,7 @@ async def edit_user(
             detail="User was not found.",
         )
 
-    return UserResponse(
-        **updated_user
-    )
-
-
-# =========================================================
-# USERS - ACTIVATE / DEACTIVATE
-# =========================================================
+    return UserResponse(**updated_user)
 
 
 @router.patch(
@@ -615,9 +448,7 @@ async def update_user_status(
         Depends(require_admin),
     ],
 ) -> UserResponse:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -637,14 +468,7 @@ async def update_user_status(
             detail="User was not found.",
         )
 
-    return UserResponse(
-        **updated_user
-    )
-
-
-# =========================================================
-# USERS - UPDATE PIN
-# =========================================================
+    return UserResponse(**updated_user)
 
 
 @router.patch(
@@ -659,9 +483,7 @@ async def update_user_pin(
         Depends(require_admin),
     ],
 ) -> UserResponse:
-    business_id = current_user.get(
-        "business_id"
-    )
+    business_id = current_user.get("business_id")
 
     if not business_id:
         raise HTTPException(
@@ -681,6 +503,4 @@ async def update_user_pin(
             detail="User was not found.",
         )
 
-    return UserResponse(
-        **updated_user
-    )
+    return UserResponse(**updated_user)

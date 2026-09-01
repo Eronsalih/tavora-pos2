@@ -1,93 +1,82 @@
+import os
+
+
+def _price(env_name: str, default: int) -> int:
+    return int(os.getenv(env_name, str(default)))
+
+
 SUBSCRIPTION_PLANS = {
-    # =====================================================
-    # STARTER
-    # =====================================================
-    "starter_monthly": {
+    "starter": {
+        "id": "starter",
         "name": "Starter",
-        "tier": "starter",
-        "billing_period": "monthly",
+        "price_minor": _price("TAVORA_STARTER_PRICE_MINOR", 999),
+        "yearly_price_minor": _price(
+            "TAVORA_STARTER_YEARLY_PRICE_MINOR",
+            9990,
+        ),
+        "currency": "EUR",
         "duration_days": 30,
-        "prices": {
-            "EUR": 2490,      # 24.90 EUR
-            "ALL": 249000,    # 2,490.00 ALL
-        },
+        "yearly_duration_days": 365,
+        "features": [
+            "tablesOrders",
+            "cashCard",
+            "productsStock",
+            "xReport",
+            "zReport",
+        ],
     },
-    "starter_yearly": {
-        "name": "Starter",
-        "tier": "starter",
-        "billing_period": "yearly",
-        "duration_days": 365,
-        "prices": {
-            "EUR": 24900,      # 249.00 EUR
-            "ALL": 2490000,    # 24,900.00 ALL
-        },
-    },
-
-    # =====================================================
-    # PRO
-    # =====================================================
-    "pro_monthly": {
-        "name": "Pro",
-        "tier": "pro",
-        "billing_period": "monthly",
+    "standard": {
+        "id": "standard",
+        "name": "Standard",
+        "price_minor": _price("TAVORA_STANDARD_PRICE_MINOR", 2999),
+        "yearly_price_minor": _price(
+            "TAVORA_STANDARD_YEARLY_PRICE_MINOR",
+            29990,
+        ),
+        "currency": "EUR",
         "duration_days": 30,
-        "prices": {
-            "EUR": 3990,      # 39.90 EUR
-            "ALL": 399000,    # 3,990.00 ALL
-        },
+        "yearly_duration_days": 365,
+        "features": [
+            "everythingStarter",
+            "kitchenBar",
+            "reports",
+            "xReport",
+            "zReport",
+        ],
     },
-    "pro_yearly": {
-        "name": "Pro",
-        "tier": "pro",
-        "billing_period": "yearly",
-        "duration_days": 365,
-        "prices": {
-            "EUR": 39900,      # 399.00 EUR
-            "ALL": 3990000,    # 39,900.00 ALL
-        },
-    },
-
-    # =====================================================
-    # BUSINESS
-    # =====================================================
-    "business_monthly": {
-        "name": "Business",
-        "tier": "business",
-        "billing_period": "monthly",
-        "duration_days": 30,
-        "prices": {
-            "EUR": 5990,      # 59.90 EUR
-            "ALL": 599000,    # 5,990.00 ALL
-        },
-    },
-    "business_yearly": {
-        "name": "Business",
-        "tier": "business",
-        "billing_period": "yearly",
-        "duration_days": 365,
-        "prices": {
-            "EUR": 59900,      # 599.00 EUR
-            "ALL": 5990000,    # 59,900.00 ALL
-        },
-    },
-
-    # =====================================================
-    # LEGACY
-    # =====================================================
-    #
-    # E mbajmë për bizneset/testet e vjetra që aktualisht
-    # kanë subscription_plan = "pro".
-    #
-    # Pagesat e reja nuk duhet ta përdorin këtë key.
-    #
     "pro": {
+        "id": "pro",
         "name": "Pro",
-        "tier": "pro",
-        "billing_period": "monthly",
+        "price_minor": _price("TAVORA_PRO_PRICE_MINOR", 4999),
+        "yearly_price_minor": _price(
+            "TAVORA_PRO_YEARLY_PRICE_MINOR",
+            49990,
+        ),
+        "currency": "EUR",
         "duration_days": 30,
-        "prices": {
-            "EUR": 3990,
-            "ALL": 399000,
-        },
+        "yearly_duration_days": 365,
+        "features": [
+            "everythingStandard",
+            "xReport",
+            "zReport",
+            "complimentaryRelease",
+            "adminPinApproval",
+            "complimentaryAudit",
+            "prioritySupport",
+        ],
     },
 }
+
+
+def public_subscription_plans() -> list[dict]:
+    return [
+        {
+            **plan,
+            "price": round(plan["price_minor"] / 100, 2),
+            "yearly_price": round(
+                plan["yearly_price_minor"] / 100,
+                2,
+            ),
+        }
+        for plan in SUBSCRIPTION_PLANS.values()
+    ]

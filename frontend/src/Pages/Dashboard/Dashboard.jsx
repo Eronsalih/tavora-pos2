@@ -141,7 +141,13 @@ function Dashboard() {
       (order) => order.status !== "paid" && order.status !== "cancelled",
     );
 
-    const totalRevenue = todayPaidOrders.reduce(
+    const revenueOrders = todayPaidOrders.filter(
+      (order) =>
+        order.payment_method === "cash" ||
+        order.payment_method === "card",
+    );
+
+    const totalRevenue = revenueOrders.reduce(
       (total, order) => total + Number(order.total || 0),
       0,
     );

@@ -1,186 +1,176 @@
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import {
+  Navigate,
+  Route,
+  Routes,
+} from "react-router-dom";
 
-import { useAuth } from "../context/AuthContext";
-
+import AuthenticatedRoute from "../Components/auth/AuthenticatedRoute";
+import PlanRoute from "../Components/auth/PlanRoute";
 import ProtectedRoute from "../Components/auth/ProtectedRoute";
 import PublicRoute from "../Components/auth/PublicRoute";
 import RoleRoute from "../Components/auth/RoleRoute";
-import SubscriptionRoute from "../Components/auth/SubscriptionRoute";
 
 import MainLayout from "../layouts/MainLayout";
-import OwnerLayout from "../layouts/OwnerLayout";
 
+import Bar from "../Pages/Bar/Bar";
 import Dashboard from "../Pages/Dashboard/Dashboard";
 import Kitchen from "../Pages/Kitchen/Kitchen";
 import Login from "../Pages/Login/Login";
-import Register from "../Pages/Register/Register";
-import PaymentPlan from "../Pages/PaymentPlan/PaymentPlan";
 import Orders from "../Pages/Orders/Orders";
+import PaymentPlan from "../Pages/PaymentPlan/PaymentPlan";
+import PlatformAdmin from "../Pages/PlatformAdmin/PlatformAdmin";
 import Products from "../Pages/Products/Products";
+import Register from "../Pages/Register/Register";
 import Reports from "../Pages/Reports/Reports";
 import Settings from "../Pages/Settings/Settings";
 import Tables from "../Pages/Tables/Tables";
-import Bar from "../Pages/Bar/Bar";
 
-import OwnerDashboard from "../Pages/Owner/Dashboard/OwnerDashboard";
-import OwnerBusinesses from "../Pages/Owner/Businesses/OwnerBusinesses";
-import OwnerBusinessDetails from "../Pages/Owner/Businesses/OwnerBusinessDetails";
-import OwnerSubscriptions from "../Pages/Owner/Subscriptions/OwnerSubscriptions";
-import OwnerPayments from "../Pages/Owner/Payments/OwnerPayments";
 
-const TENANT_ROLES = ["admin", "cashier", "waiter"];
-
-// =========================================================
-// ROOT REDIRECT
-// =========================================================
-
-function RootRedirect() {
-  const { user } = useAuth();
-
-  if (user?.role === "superadmin") {
-    return <Navigate to="/owner" replace />;
-  }
-
-  return <Navigate to="/dashboard" replace />;
-}
-
-// =========================================================
-// TENANT ROUTE
-// =========================================================
-
-function TenantRoute() {
-  const { user } = useAuth();
-
-  if (user?.role === "superadmin") {
-    return <Navigate to="/owner" replace />;
-  }
-
-  if (!TENANT_ROLES.includes(user?.role)) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <Outlet />;
-}
-
-// =========================================================
-// OWNER ROUTE
-// =========================================================
-
-function OwnerRoute() {
-  const { user } = useAuth();
-
-  if (user?.role !== "superadmin") {
-    return <Navigate to="/" replace />;
-  }
-
-  return <Outlet />;
-}
-
-// =========================================================
-// APP ROUTES
-// =========================================================
-
-function AppRoutes() {
+export default function AppRoutes() {
   return (
     <Routes>
-      {/* ================================================= */}
-      {/* PUBLIC */}
-      {/* ================================================= */}
-
       <Route element={<PublicRoute />}>
-        <Route path="/login" element={<Login />} />
+        <Route
+          path="/login"
+          element={<Login />}
+        />
 
-        <Route path="/register" element={<Register />} />
+        <Route
+          path="/register"
+          element={<Register />}
+        />
       </Route>
 
-      {/* ================================================= */}
-      {/* AUTHENTICATED */}
-      {/* ================================================= */}
+
+      <Route element={<AuthenticatedRoute />}>
+        <Route
+          path="/payment-plan"
+          element={<PaymentPlan />}
+        />
+
+        <Route
+          path="/platform-admin"
+          element={<PlatformAdmin />}
+        />
+      </Route>
+
 
       <Route element={<ProtectedRoute />}>
-        {/* ROOT */}
+        <Route element={<MainLayout />}>
 
-        <Route path="/" element={<RootRedirect />} />
+          {/* STARTER + STANDARD + PRO */}
 
-        {/* ============================================= */}
-        {/* OWNER SYSTEM */}
-        {/* ============================================= */}
-
-        <Route element={<OwnerRoute />}>
-          <Route path="/owner" element={<OwnerLayout />}>
-            <Route index element={<OwnerDashboard />} />
-
-            <Route path="businesses" element={<OwnerBusinesses />} />
-
+          <Route
+            element={
+              <PlanRoute minimumPlan="starter" />
+            }
+          >
             <Route
-              path="businesses/:businessId"
-              element={<OwnerBusinessDetails />}
+              index
+              element={<Dashboard />}
             />
 
-            <Route path="subscriptions" element={<OwnerSubscriptions />} />
+            <Route
+              path="/tables"
+              element={<Tables />}
+            />
 
-            <Route path="payments" element={<OwnerPayments />} />
-          </Route>
-        </Route>
+            <Route
+              path="/orders"
+              element={<Orders />}
+            />
 
-        {/* ============================================= */}
-        {/* TENANT SYSTEM */}
-        {/* ============================================= */}
-
-        <Route element={<TenantRoute />}>
-          {/* PAYMENT PLAN */}
-
-          <Route element={<RoleRoute allowedRoles={["admin"]} />}>
-            <Route path="/payment-plan" element={<PaymentPlan />} />
-          </Route>
-
-          {/* =========================================== */}
-          {/* ACTIVE SUBSCRIPTION */}
-          {/* =========================================== */}
-
-          <Route element={<SubscriptionRoute />}>
-            <Route element={<MainLayout />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-
-              <Route path="/tables" element={<Tables />} />
-
-              <Route path="/orders" element={<Orders />} />
-
-              <Route path="/bar" element={<Bar />} />
-
-              {/* ===================================== */}
-              {/* ADMIN + CASHIER */}
-              {/* ===================================== */}
+            <Route
+              element={
+                <RoleRoute
+                  allowedRoles={["admin"]}
+                />
+              }
+            >
+              <Route
+                path="/products"
+                element={<Products />}
+              />
 
               <Route
-                element={<RoleRoute allowedRoles={["admin", "cashier"]} />}
-              >
-                <Route path="/kitchen" element={<Kitchen />} />
+                path="/settings"
+                element={<Settings />}
+              />
+            </Route>
+            <Route
+              element={
+                <RoleRoute
+                  allowedRoles={[
+                    "admin",
+                    "cashier",
+                  ]}
+                />
+              }
+            >
+              <Route
+                path="/reports"
+                element={<Reports />}
+              />
+            </Route>
 
-                <Route path="/reports" element={<Reports />} />
-              </Route>
+          </Route>
 
-              {/* ===================================== */}
-              {/* ADMIN ONLY */}
-              {/* ===================================== */}
 
-              <Route element={<RoleRoute allowedRoles={["admin"]} />}>
-                <Route path="/products" element={<Products />} />
+          {/* STANDARD + PRO */}
 
-                <Route path="/settings" element={<Settings />} />
-              </Route>
+          <Route
+            element={
+              <PlanRoute minimumPlan="standard" />
+            }
+          >
+            <Route
+              element={
+                <RoleRoute
+                  allowedRoles={[
+                    "admin",
+                    "cashier",
+                  ]}
+                />
+              }
+            >
+              <Route
+                path="/kitchen"
+                element={<Kitchen />}
+              />
+
+            </Route>
+
+            <Route
+              element={
+                <RoleRoute
+                  allowedRoles={[
+                    "admin",
+                    "cashier",
+                    "waiter",
+                  ]}
+                />
+              }
+            >
+              <Route
+                path="/bar"
+                element={<Bar />}
+              />
             </Route>
           </Route>
+
         </Route>
       </Route>
 
-      {/* ================================================= */}
-      {/* FALLBACK */}
-      {/* ================================================= */}
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route
+        path="*"
+        element={
+          <Navigate
+            to="/"
+            replace
+          />
+        }
+      />
     </Routes>
   );
 }
-
-export default AppRoutes;

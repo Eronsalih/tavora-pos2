@@ -4,11 +4,6 @@ from enum import Enum
 from pydantic import BaseModel, EmailStr, Field
 
 
-# =========================================================
-# USER ROLES
-# =========================================================
-
-
 class UserRole(str, Enum):
     SUPERADMIN = "superadmin"
     ADMIN = "admin"
@@ -20,11 +15,6 @@ class TenantUserRole(str, Enum):
     ADMIN = "admin"
     CASHIER = "cashier"
     WAITER = "waiter"
-
-
-# =========================================================
-# USER CREATE
-# =========================================================
 
 
 class UserCreate(BaseModel):
@@ -54,11 +44,6 @@ class UserCreate(BaseModel):
     role: TenantUserRole = TenantUserRole.WAITER
 
 
-# =========================================================
-# BUSINESS OWNER SIGNUP
-# =========================================================
-
-
 class OwnerSignup(BaseModel):
     business_name: str = Field(
         min_length=2,
@@ -82,11 +67,6 @@ class OwnerSignup(BaseModel):
     )
 
 
-# =========================================================
-# LOGIN
-# =========================================================
-
-
 class UserLogin(BaseModel):
     email: EmailStr
 
@@ -98,8 +78,6 @@ class UserLogin(BaseModel):
 
 class UserPinLogin(BaseModel):
     business_id: str = Field(
-        min_length=24,
-        max_length=24,
         pattern=r"^[0-9a-fA-F]{24}$",
     )
 
@@ -108,20 +86,10 @@ class UserPinLogin(BaseModel):
     )
 
 
-# =========================================================
-# PIN UPDATE
-# =========================================================
-
-
 class UserPinUpdate(BaseModel):
     pin: str = Field(
         pattern=r"^\d{4}$",
     )
-
-
-# =========================================================
-# USER RESPONSE
-# =========================================================
 
 
 class UserResponse(BaseModel):
@@ -135,20 +103,10 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
-# =========================================================
-# TOKEN RESPONSE
-# =========================================================
-
-
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
-
-
-# =========================================================
-# SUBSCRIPTION RESPONSE
-# =========================================================
 
 
 class SubscriptionResponse(BaseModel):
@@ -160,11 +118,6 @@ class SubscriptionResponse(BaseModel):
     payment_provider: str | None = None
 
 
-# =========================================================
-# USER UPDATE
-# =========================================================
-
-
 class UserUpdate(BaseModel):
     name: str = Field(
         min_length=2,
@@ -174,11 +127,6 @@ class UserUpdate(BaseModel):
     email: EmailStr
 
     role: TenantUserRole
-
-
-# =========================================================
-# USER STATUS
-# =========================================================
 
 
 class UserStatusUpdate(BaseModel):
