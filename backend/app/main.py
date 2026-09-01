@@ -3,6 +3,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.config import settings
+
 from app.routers import (
     auth,
     health,
@@ -51,3 +53,24 @@ app.include_router(tables.router)
 app.include_router(orders.router)
 app.include_router(reports.router)
 app.include_router(platform_admin.router)
+
+
+@app.get("/api/debug/paddle-config")
+async def paddle_config_debug():
+    return {
+        "environment": settings.paddle_environment,
+        "api_key": "PRESENT" if settings.paddle_api_key else "MISSING",
+        "webhook_secret": (
+            "PRESENT" if settings.paddle_webhook_secret else "MISSING"
+        ),
+        "starter_monthly": (
+            "PRESENT"
+            if settings.paddle_price_id_starter_monthly
+            else "MISSING"
+        ),
+        "starter_yearly": (
+            "PRESENT"
+            if settings.paddle_price_id_starter_yearly
+            else "MISSING"
+        ),
+    }
