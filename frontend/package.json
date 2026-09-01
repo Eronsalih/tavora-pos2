@@ -15,6 +15,7 @@
     "desktop:build": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
+    "@paddle/paddle-js": "^1.6.5",
     "axios": "^1.18.1",
     "framer-motion": "^12.42.2",
     "i18next": "^26.3.6",

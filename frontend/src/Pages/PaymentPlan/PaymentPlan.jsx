@@ -16,20 +16,15 @@ import {
   getSubscriptionPlans,
   simulatePaymentSuccess,
 } from "../../services/paymentService";
+import { getPaddle } from "../../services/paddleService";
 
 import "./PaymentPlan.css";
-
 
 export default function PaymentPlan() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const {
-    user,
-    subscription,
-    refreshSubscription,
-    logout,
-  } = useAuth();
+  const { user, subscription, refreshSubscription, logout } = useAuth();
 
   const [plans, setPlans] = useState([]);
   const [billingCycle, setBillingCycle] = useState("monthly");
@@ -39,7 +34,6 @@ export default function PaymentPlan() {
   const [processing, setProcessing] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
-
 
   useEffect(() => {
     if (user?.role === "superadmin") {
@@ -56,8 +50,7 @@ export default function PaymentPlan() {
         setPlans(Array.isArray(data) ? data : []);
       } catch (requestError) {
         setError(
-          requestError.response?.data?.detail ||
-            t("paymentPlan.loadError"),
+          requestError.response?.data?.detail || t("paymentPlan.loadError"),
         );
       } finally {
         setLoading(false);
@@ -65,23 +58,16 @@ export default function PaymentPlan() {
     }
 
     loadPlans();
-  }, [
-    navigate,
-    t,
-    user,
-  ]);
-
+  }, [navigate, t, user]);
 
   const orderedPlans = useMemo(
     () =>
       [...plans].sort(
         (first, second) =>
-          Number(first.price_minor || 0) -
-          Number(second.price_minor || 0),
+          Number(first.price_minor || 0) - Number(second.price_minor || 0),
       ),
     [plans],
   );
-
 
   async function handleChoosePlan(planId) {
     try {
@@ -89,26 +75,44 @@ export default function PaymentPlan() {
       setProcessing(true);
       setError("");
 
-      const createdPayment =
-        await createSubscriptionPayment(
-          planId,
-          "paddle",
-          billingCycle,
-        );
+      const createdPayment = await createSubscriptionPayment(
+        planId,
+        "paddle",
+        billingCycle,
+      );
 
       setPayment(createdPayment);
 
-      if (createdPayment.checkout_url) {
-        window.open(
-          createdPayment.checkout_url,
-          "_blank",
-          "noopener,noreferrer",
-        );
-      } else {
-        setError(
-          t("paymentPlan.paddleNotConfigured"),
-        );
+      if (!createdPayment.checkout_url) {
+        setError(t("paymentPlan.paddleNotConfigured"));
+        return;
       }
+
+      const checkoutUrl = new URL(
+        createdPayment.checkout_url,
+        window.location.origin,
+      );
+
+      const transactionId = checkoutUrl.searchParams.get("_ptxn");
+
+      if (!transactionId) {
+        throw new Error("Paddle transaction ID mungon në checkout URL.");
+      }
+
+      const paddle = await getPaddle();
+
+      if (!paddle) {
+        throw new Error("Paddle Checkout nuk mund të inicializohet.");
+      }
+
+      paddle.Checkout.open({
+        transactionId,
+        settings: {
+          displayMode: "overlay",
+          theme: "light",
+          locale: "en",
+        },
+      });
     } catch (requestError) {
       setError(
         requestError.response?.data?.detail ||
@@ -119,7 +123,6 @@ export default function PaymentPlan() {
       setProcessing(false);
     }
   }
-
 
   async function handleRefreshSubscription() {
     try {
@@ -139,7 +142,6 @@ export default function PaymentPlan() {
       setChecking(false);
     }
   }
-
 
   async function handleDevelopmentSuccess() {
     if (!payment?.id) {
@@ -163,14 +165,12 @@ export default function PaymentPlan() {
     }
   }
 
-
   function handleLogout() {
     logout();
     navigate("/login", {
       replace: true,
     });
   }
-
 
   return (
     <main className="payment-plan-page">
@@ -183,9 +183,7 @@ export default function PaymentPlan() {
 
             <div>
               <strong>Tavora POS</strong>
-              <small>
-                {user?.name || user?.email}
-              </small>
+              <small>{user?.name || user?.email}</small>
             </div>
           </div>
 
@@ -200,9 +198,7 @@ export default function PaymentPlan() {
         </header>
 
         <div className="payment-plan-heading">
-          <span>
-            {t("paymentPlan.eyebrow")}
-          </span>
+          <span>{t("paymentPlan.eyebrow")}</span>
 
           <h1>{t("paymentPlan.title")}</h1>
 
@@ -211,26 +207,18 @@ export default function PaymentPlan() {
           {subscription && (
             <small>
               {t("paymentPlan.currentStatus")}:{" "}
-              <strong>
-                {subscription.status}
-              </strong>
+              <strong>{subscription.status}</strong>
             </small>
           )}
         </div>
 
-        {error && (
-          <div className="payment-plan-error">
-            {error}
-          </div>
-        )}
+        {error && <div className="payment-plan-error">{error}</div>}
 
         <div className="payment-plan-billing-switch">
           <button
             type="button"
             className={
-              billingCycle === "monthly"
-                ? "payment-plan-cycle-active"
-                : ""
+              billingCycle === "monthly" ? "payment-plan-cycle-active" : ""
             }
             onClick={() => {
               setBillingCycle("monthly");
@@ -245,9 +233,7 @@ export default function PaymentPlan() {
           <button
             type="button"
             className={
-              billingCycle === "yearly"
-                ? "payment-plan-cycle-active"
-                : ""
+              billingCycle === "yearly" ? "payment-plan-cycle-active" : ""
             }
             onClick={() => {
               setBillingCycle("yearly");
@@ -265,17 +251,13 @@ export default function PaymentPlan() {
 
         {loading ? (
           <div className="payment-plan-loading">
-            <LoaderCircle
-              size={32}
-              className="payment-plan-spinner"
-            />
+            <LoaderCircle size={32} className="payment-plan-spinner" />
             {t("paymentPlan.loading")}
           </div>
         ) : (
           <div className="payment-plan-grid">
             {orderedPlans.map((plan) => {
-              const isSelected =
-                selectedPlan === plan.id;
+              const isSelected = selectedPlan === plan.id;
 
               return (
                 <article
@@ -320,23 +302,19 @@ export default function PaymentPlan() {
                   </div>
 
                   <div className="payment-plan-features">
-                    {(plan.features || []).map(
-                      (feature) => (
-                        <div key={feature}>
-                          <Check size={17} />
-                          <span>{t(`planFeatures.${feature}`)}</span>
-                        </div>
-                      ),
-                    )}
+                    {(plan.features || []).map((feature) => (
+                      <div key={feature}>
+                        <Check size={17} />
+                        <span>{t(`planFeatures.${feature}`)}</span>
+                      </div>
+                    ))}
                   </div>
 
                   <button
                     type="button"
                     className="payment-plan-buy"
                     disabled={processing}
-                    onClick={() =>
-                      handleChoosePlan(plan.id)
-                    }
+                    onClick={() => handleChoosePlan(plan.id)}
                   >
                     {processing && isSelected ? (
                       <>
@@ -359,12 +337,8 @@ export default function PaymentPlan() {
         {payment && (
           <section className="payment-plan-pending">
             <div>
-              <strong>
-                {t("paymentPlan.paymentCreated")}
-              </strong>
-              <p>
-                {t("paymentPlan.paymentCreatedHelp")}
-              </p>
+              <strong>{t("paymentPlan.paymentCreated")}</strong>
+              <p>{t("paymentPlan.paymentCreatedHelp")}</p>
             </div>
 
             <button
@@ -374,15 +348,9 @@ export default function PaymentPlan() {
             >
               <RefreshCw
                 size={17}
-                className={
-                  checking
-                    ? "payment-plan-spinner"
-                    : ""
-                }
+                className={checking ? "payment-plan-spinner" : ""}
               />
-              {checking
-                ? t("paymentPlan.checking")
-                : t("paymentPlan.check")}
+              {checking ? t("paymentPlan.checking") : t("paymentPlan.check")}
             </button>
 
             {import.meta.env.DEV && (
